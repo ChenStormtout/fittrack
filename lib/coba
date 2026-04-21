@@ -1,0 +1,2434 @@
+# FitLife Final Rework — Workout & Game (Serius, Logis, Siap Implementasi)
+
+Dokumen ini berisi perombakan total modul **Workout** dan **Mini Game** agar:
+
+* logis
+* tidak terasa dummy
+* enak dipakai user
+* enak dipresentasikan
+* mudah diterapkan bertahap
+
+> Fokus: **Workout** dan **Game** dulu. Modul lain tidak disentuh di dokumen ini.
+
+---
+
+## A. Konsep Baru Workout
+
+### Flow Workout yang benar
+
+1. User buka menu **Aktivitas & Workout**
+2. User lihat daftar program latihan
+3. User pilih salah satu program
+4. Masuk ke **Workout Detail Page**
+
+   * lihat fokus otot
+   * lihat daftar exercise
+   * lihat set / reps / rest
+   * bisa buka tutorial video
+   * baru tekan **Mulai Workout**
+5. Masuk ke **Workout Session Page**
+
+   * tampil satu exercise aktif
+   * user menandai set selesai
+   * rest timer otomatis
+   * bisa pause / skip rest
+   * pindah ke exercise berikutnya
+   * workout selesai otomatis saat seluruh exercise selesai
+6. Muncul **Workout Result Page**
+
+   * total durasi
+   * total set
+   * estimasi kalori
+   * save ke history
+   * achievement bila memenuhi syarat
+
+### Hal yang dihapus
+
+* Tombol "langsung selesai workout"
+* Start workout langsung dari card list
+* Preview yang terlalu minim
+
+---
+
+## B. Konsep Baru Mini Game
+
+### Game baru: Fit Dash
+
+Gameplay:
+
+* Ada **3 lane**: kiri, tengah, kanan
+* Player ada di bawah
+* Item turun dari atas
+* User pindah lane kiri/kanan
+* Tangkap item sehat
+* Hindari junk food
+* Kalau terkena junk food terlalu sering -> game over
+* Ada score
+* Ada best score / high score
+
+### Kenapa ini lebih bagus
+
+* Ada gameplay sungguhan
+* Lebih logis daripada sekadar tombol tap objek
+* Lebih mudah dipahami dosen
+* Lebih enak dikembangkan nanti ke gyroscope
+
+---
+
+# 1. FILE BARU / FILE YANG DIGANTI
+
+## Workout
+
+* `lib/features/activity/controllers/workout_controller.dart`
+* `lib/features/activity/workout_detail_page.dart`
+* `lib/features/activity/workout_session_page.dart`
+* `lib/features/activity/workout_result_page.dart`
+* `lib/features/activity/activity_page.dart`
+
+## Game
+
+* `lib/features/minigame/controllers/minigame_controller.dart`
+* `lib/features/minigame/minigame_page.dart`
+
+## Data layer
+
+* `lib/data/models/workout_session_model.dart`
+* `lib/data/models/achievement_model.dart`
+* `lib/data/models/game_score_model.dart`
+* `lib/data/repositories/workout_repository.dart`
+* `lib/data/local/db/table_names.dart`
+* `lib/data/local/db/app_database.dart`
+
+---
+
+# 2. TABLE NAMES
+
+## `lib/data/local/db/table_names.dart`
+
+```dart
+class TableNames {
+  static const users = 'users';
+  static const activities = 'activities';
+  static const nutritionLogs = 'nutrition_logs';
+  static const waterLogs = 'water_logs';
+
+  static const workoutSessions = 'workout_sessions';
+  static const achievements = 'achievements';
+  static const gameScores = 'game_scores';
+}
+```
+
+---
+
+# 3. DATABASE
+
+## `lib/data/local/db/app_database.dart`
+
+> Naikkan `version` ke `6`.
+> Jika database lama masih bentrok, hapus `fitlife.db` lama.
+
+```dart
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+
+import 'table_names.dart';
+
+class AppDatabase {
+  AppDatabase._();
+
+  static final AppDatabase instance = AppDatabase._();
+  static Database? _database;
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<Database> _initDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'fitlife.db');
+
+    return openDatabase(
+      path,
+      version: 6,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE ${TableNames.users} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        full_name TEXT,
+        age INTEGER,
+        gender TEXT,
+        height_cm REAL,
+        weight_kg REAL,
+        goal TEXT,
+        calisthenics_level TEXT,
+        activity_level TEXT,
+        profile_image TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.activities} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        activity_type TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        duration_seconds INTEGER NOT NULL,
+        distance_km REAL NOT NULL,
+        calories_burned REAL NOT NULL,
+        route_json TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.nutritionLogs} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        food_name TEXT NOT NULL,
+        calories REAL NOT NULL,
+        protein REAL NOT NULL,
+        carbs REAL NOT NULL,
+        fat REAL NOT NULL,
+        meal_type TEXT NOT NULL,
+        grams REAL NOT NULL,
+        selected_date TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.waterLogs} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        amount_ml INTEGER NOT NULL,
+        selected_date TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.workoutSessions} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        category TEXT NOT NULL,
+        program_name TEXT NOT NULL,
+        total_exercises INTEGER NOT NULL,
+        total_sets INTEGER NOT NULL,
+        duration_seconds INTEGER NOT NULL,
+        calories_burned REAL NOT NULL,
+        completed INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.achievements} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.gameScores} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL,
+        game_name TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN full_name TEXT');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN age INTEGER');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN gender TEXT');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN height_cm REAL');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN weight_kg REAL');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN goal TEXT');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN calisthenics_level TEXT');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN activity_level TEXT');
+      await db.execute('ALTER TABLE ${TableNames.users} ADD COLUMN profile_image TEXT');
+    }
+
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE ${TableNames.activities} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          activity_type TEXT NOT NULL,
+          start_time TEXT NOT NULL,
+          end_time TEXT NOT NULL,
+          duration_seconds INTEGER NOT NULL,
+          distance_km REAL NOT NULL,
+          calories_burned REAL NOT NULL,
+          route_json TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE ${TableNames.nutritionLogs} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          food_name TEXT NOT NULL,
+          calories REAL NOT NULL,
+          protein REAL NOT NULL,
+          carbs REAL NOT NULL,
+          fat REAL NOT NULL,
+          meal_type TEXT NOT NULL,
+          grams REAL NOT NULL DEFAULT 100,
+          selected_date TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE ${TableNames.waterLogs} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          amount_ml INTEGER NOT NULL,
+          selected_date TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+
+    if (oldVersion < 6) {
+      await db.execute('''
+        CREATE TABLE ${TableNames.workoutSessions} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          category TEXT NOT NULL,
+          program_name TEXT NOT NULL,
+          total_exercises INTEGER NOT NULL,
+          total_sets INTEGER NOT NULL,
+          duration_seconds INTEGER NOT NULL,
+          calories_burned REAL NOT NULL,
+          completed INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE ${TableNames.achievements} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE ${TableNames.gameScores} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL,
+          game_name TEXT NOT NULL,
+          score INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+  }
+}
+```
+
+---
+
+# 4. MODEL DATA
+
+## `lib/data/models/workout_session_model.dart`
+
+```dart
+class WorkoutSessionModel {
+  final int? id;
+  final String userEmail;
+  final String category;
+  final String programName;
+  final int totalExercises;
+  final int totalSets;
+  final int durationSeconds;
+  final double caloriesBurned;
+  final int completed;
+  final String createdAt;
+
+  WorkoutSessionModel({
+    this.id,
+    required this.userEmail,
+    required this.category,
+    required this.programName,
+    required this.totalExercises,
+    required this.totalSets,
+    required this.durationSeconds,
+    required this.caloriesBurned,
+    required this.completed,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'user_email': userEmail,
+      'category': category,
+      'program_name': programName,
+      'total_exercises': totalExercises,
+      'total_sets': totalSets,
+      'duration_seconds': durationSeconds,
+      'calories_burned': caloriesBurned,
+      'completed': completed,
+      'created_at': createdAt,
+    };
+  }
+
+  factory WorkoutSessionModel.fromMap(Map<String, dynamic> map) {
+    return WorkoutSessionModel(
+      id: map['id'] as int?,
+      userEmail: map['user_email'] as String,
+      category: map['category'] as String,
+      programName: map['program_name'] as String,
+      totalExercises: map['total_exercises'] as int,
+      totalSets: map['total_sets'] as int,
+      durationSeconds: map['duration_seconds'] as int,
+      caloriesBurned: (map['calories_burned'] as num).toDouble(),
+      completed: map['completed'] as int,
+      createdAt: map['created_at'] as String,
+    );
+  }
+}
+```
+
+## `lib/data/models/achievement_model.dart`
+
+```dart
+class AchievementModel {
+  final int? id;
+  final String userEmail;
+  final String title;
+  final String description;
+  final String createdAt;
+
+  AchievementModel({
+    this.id,
+    required this.userEmail,
+    required this.title,
+    required this.description,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'user_email': userEmail,
+      'title': title,
+      'description': description,
+      'created_at': createdAt,
+    };
+  }
+
+  factory AchievementModel.fromMap(Map<String, dynamic> map) {
+    return AchievementModel(
+      id: map['id'] as int?,
+      userEmail: map['user_email'] as String,
+      title: map['title'] as String,
+      description: map['description'] as String,
+      createdAt: map['created_at'] as String,
+    );
+  }
+}
+```
+
+## `lib/data/models/game_score_model.dart`
+
+```dart
+class GameScoreModel {
+  final int? id;
+  final String userEmail;
+  final String gameName;
+  final int score;
+  final String createdAt;
+
+  GameScoreModel({
+    this.id,
+    required this.userEmail,
+    required this.gameName,
+    required this.score,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'user_email': userEmail,
+      'game_name': gameName,
+      'score': score,
+      'created_at': createdAt,
+    };
+  }
+
+  factory GameScoreModel.fromMap(Map<String, dynamic> map) {
+    return GameScoreModel(
+      id: map['id'] as int?,
+      userEmail: map['user_email'] as String,
+      gameName: map['game_name'] as String,
+      score: map['score'] as int,
+      createdAt: map['created_at'] as String,
+    );
+  }
+}
+```
+
+---
+
+# 5. WORKOUT REPOSITORY
+
+## `lib/data/repositories/workout_repository.dart`
+
+```dart
+import '../local/db/app_database.dart';
+import '../local/db/table_names.dart';
+import '../models/achievement_model.dart';
+import '../models/game_score_model.dart';
+import '../models/workout_session_model.dart';
+
+class WorkoutRepository {
+  WorkoutRepository({required AppDatabase appDatabase})
+      : _appDatabase = appDatabase;
+
+  final AppDatabase _appDatabase;
+
+  Future<int> insertWorkoutSession(WorkoutSessionModel session) async {
+    final db = await _appDatabase.database;
+    return db.insert(TableNames.workoutSessions, session.toMap());
+  }
+
+  Future<List<WorkoutSessionModel>> getWorkoutHistory(String userEmail) async {
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.workoutSessions,
+      where: 'user_email = ?',
+      whereArgs: [userEmail.trim().toLowerCase()],
+      orderBy: 'created_at DESC',
+    );
+
+    return result.map(WorkoutSessionModel.fromMap).toList();
+  }
+
+  Future<int> insertAchievement(AchievementModel achievement) async {
+    final db = await _appDatabase.database;
+    return db.insert(TableNames.achievements, achievement.toMap());
+  }
+
+  Future<List<AchievementModel>> getAchievements(String userEmail) async {
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.achievements,
+      where: 'user_email = ?',
+      whereArgs: [userEmail.trim().toLowerCase()],
+      orderBy: 'created_at DESC',
+    );
+
+    return result.map(AchievementModel.fromMap).toList();
+  }
+
+  Future<int> insertGameScore(GameScoreModel score) async {
+    final db = await _appDatabase.database;
+    return db.insert(TableNames.gameScores, score.toMap());
+  }
+
+  Future<List<GameScoreModel>> getGameScores(String userEmail) async {
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.gameScores,
+      where: 'user_email = ?',
+      whereArgs: [userEmail.trim().toLowerCase()],
+      orderBy: 'score DESC',
+    );
+
+    return result.map(GameScoreModel.fromMap).toList();
+  }
+}
+```
+
+---
+
+# 6. WORKOUT CONTROLLER — FINAL
+
+## `lib/features/activity/controllers/workout_controller.dart`
+
+```dart
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import '../../../data/models/achievement_model.dart';
+import '../../../data/models/workout_session_model.dart';
+import '../../../data/repositories/workout_repository.dart';
+
+class WorkoutExercise {
+  final String name;
+  final String description;
+  final String youtubeUrl;
+  final int sets;
+  final int reps;
+  final int restSeconds;
+  final bool isTimed;
+
+  WorkoutExercise({
+    required this.name,
+    required this.description,
+    required this.youtubeUrl,
+    required this.sets,
+    required this.reps,
+    required this.restSeconds,
+    this.isTimed = false,
+  });
+}
+
+class WorkoutProgram {
+  final String category;
+  final String title;
+  final String subtitle;
+  final String targetArea;
+  final String difficulty;
+  final int estimatedMinutes;
+  final List<WorkoutExercise> exercises;
+
+  WorkoutProgram({
+    required this.category,
+    required this.title,
+    required this.subtitle,
+    required this.targetArea,
+    required this.difficulty,
+    required this.estimatedMinutes,
+    required this.exercises,
+  });
+}
+
+class WorkoutController extends ChangeNotifier {
+  WorkoutController({
+    required WorkoutRepository workoutRepository,
+  }) : _workoutRepository = workoutRepository;
+
+  final WorkoutRepository _workoutRepository;
+
+  WorkoutProgram? _currentProgram;
+  int _currentExerciseIndex = 0;
+  int _currentSet = 1;
+  int _elapsedSeconds = 0;
+  int _restRemaining = 0;
+  bool _isWorkoutActive = false;
+  bool _isResting = false;
+  bool _isPaused = false;
+  WorkoutSessionModel? _lastCompletedSession;
+
+  Timer? _timer;
+  Timer? _restTimer;
+
+  List<WorkoutSessionModel> _history = [];
+  List<AchievementModel> _achievements = [];
+
+  WorkoutProgram? get currentProgram => _currentProgram;
+  int get currentExerciseIndex => _currentExerciseIndex;
+  int get currentSet => _currentSet;
+  int get elapsedSeconds => _elapsedSeconds;
+  int get restRemaining => _restRemaining;
+  bool get isWorkoutActive => _isWorkoutActive;
+  bool get isResting => _isResting;
+  bool get isPaused => _isPaused;
+  List<WorkoutSessionModel> get history => _history;
+  List<AchievementModel> get achievements => _achievements;
+  WorkoutSessionModel? get lastCompletedSession => _lastCompletedSession;
+
+  WorkoutExercise? get currentExercise {
+    if (_currentProgram == null) return null;
+    if (_currentExerciseIndex >= _currentProgram!.exercises.length) return null;
+    return _currentProgram!.exercises[_currentExerciseIndex];
+  }
+
+  int get totalExercises => _currentProgram?.exercises.length ?? 0;
+
+  void startWorkout(WorkoutProgram program) {
+    _currentProgram = program;
+    _currentExerciseIndex = 0;
+    _currentSet = 1;
+    _elapsedSeconds = 0;
+    _restRemaining = 0;
+    _isWorkoutActive = true;
+    _isResting = false;
+    _isPaused = false;
+    _lastCompletedSession = null;
+
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!_isPaused && _isWorkoutActive) {
+        _elapsedSeconds++;
+        notifyListeners();
+      }
+    });
+
+    notifyListeners();
+  }
+
+  void pauseWorkout() {
+    _isPaused = !_isPaused;
+    notifyListeners();
+  }
+
+  void finishCurrentSet() {
+    final exercise = currentExercise;
+    if (exercise == null) return;
+
+    if (_currentSet < exercise.sets) {
+      _startRest(exercise.restSeconds);
+    } else {
+      _moveToNextExerciseOrFinish();
+    }
+  }
+
+  void _moveToNextExerciseOrFinish() {
+    if (_currentProgram == null) return;
+
+    if (_currentExerciseIndex < _currentProgram!.exercises.length - 1) {
+      _currentExerciseIndex++;
+      _currentSet = 1;
+      _isResting = false;
+      _restRemaining = 0;
+    } else {
+      _isWorkoutActive = false;
+    }
+
+    notifyListeners();
+  }
+
+  void _startRest(int seconds) {
+    _isResting = true;
+    _restRemaining = seconds;
+    notifyListeners();
+
+    _restTimer?.cancel();
+    _restTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_isPaused) return;
+
+      _restRemaining--;
+      if (_restRemaining <= 0) {
+        timer.cancel();
+        _isResting = false;
+        _restRemaining = 0;
+        _currentSet++;
+      }
+      notifyListeners();
+    });
+  }
+
+  void skipRest() {
+    _restTimer?.cancel();
+    _isResting = false;
+    _restRemaining = 0;
+    _currentSet++;
+    notifyListeners();
+  }
+
+  Future<bool> completeWorkout(String userEmail) async {
+    if (_currentProgram == null) return false;
+
+    _timer?.cancel();
+    _restTimer?.cancel();
+
+    final totalSets = _currentProgram!.exercises.fold<int>(
+      0,
+      (sum, item) => sum + item.sets,
+    );
+
+    final calories = (_elapsedSeconds / 60.0) * 6.5;
+
+    final session = WorkoutSessionModel(
+      userEmail: userEmail.trim().toLowerCase(),
+      category: _currentProgram!.category,
+      programName: _currentProgram!.title,
+      totalExercises: _currentProgram!.exercises.length,
+      totalSets: totalSets,
+      durationSeconds: _elapsedSeconds,
+      caloriesBurned: calories,
+      completed: 1,
+      createdAt: DateTime.now().toIso8601String(),
+    );
+
+    await _workoutRepository.insertWorkoutSession(session);
+
+    if (_elapsedSeconds >= 600) {
+      await _workoutRepository.insertAchievement(
+        AchievementModel(
+          userEmail: userEmail.trim().toLowerCase(),
+          title: 'Workout Completed',
+          description: 'Berhasil menyelesaikan ${_currentProgram!.title}',
+          createdAt: DateTime.now().toIso8601String(),
+        ),
+      );
+    }
+
+    await loadHistory(userEmail);
+    await loadAchievements(userEmail);
+
+    _lastCompletedSession = session;
+    _clearSession(clearResult: false);
+    return true;
+  }
+
+  void cancelWorkout() {
+    _clearSession(clearResult: true);
+  }
+
+  void clearLastResult() {
+    _lastCompletedSession = null;
+    notifyListeners();
+  }
+
+  void _clearSession({required bool clearResult}) {
+    _timer?.cancel();
+    _restTimer?.cancel();
+    _currentProgram = null;
+    _currentExerciseIndex = 0;
+    _currentSet = 1;
+    _elapsedSeconds = 0;
+    _restRemaining = 0;
+    _isWorkoutActive = false;
+    _isResting = false;
+    _isPaused = false;
+    if (clearResult) {
+      _lastCompletedSession = null;
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadHistory(String userEmail) async {
+    _history = await _workoutRepository.getWorkoutHistory(userEmail);
+    notifyListeners();
+  }
+
+  Future<void> loadAchievements(String userEmail) async {
+    _achievements = await _workoutRepository.getAchievements(userEmail);
+    notifyListeners();
+  }
+
+  List<WorkoutProgram> getWorkoutPrograms() {
+    return [
+      WorkoutProgram(
+        category: 'Calisthenics',
+        title: 'Calisthenics Upper Body Beginner',
+        subtitle: 'Bodyweight dasar untuk dada, bahu, dan core',
+        targetArea: 'Upper Body',
+        difficulty: 'Beginner',
+        estimatedMinutes: 18,
+        exercises: [
+          WorkoutExercise(
+            name: 'Incline Push-up',
+            description: 'Push-up di permukaan lebih tinggi agar lebih mudah.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=incline+push+up+tutorial',
+            sets: 3,
+            reps: 10,
+            restSeconds: 40,
+          ),
+          WorkoutExercise(
+            name: 'Knee Push-up',
+            description: 'Push-up dengan lutut menyentuh lantai.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=knee+push+up+tutorial',
+            sets: 3,
+            reps: 8,
+            restSeconds: 45,
+          ),
+          WorkoutExercise(
+            name: 'Plank',
+            description: 'Tahan posisi tubuh lurus untuk melatih core.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=plank+tutorial',
+            sets: 3,
+            reps: 30,
+            restSeconds: 30,
+            isTimed: true,
+          ),
+        ],
+      ),
+      WorkoutProgram(
+        category: 'Calisthenics',
+        title: 'Calisthenics Lower Body Advance',
+        subtitle: 'Kaki dan core dengan intensitas lebih tinggi',
+        targetArea: 'Lower Body',
+        difficulty: 'Advance',
+        estimatedMinutes: 24,
+        exercises: [
+          WorkoutExercise(
+            name: 'Jump Squat',
+            description: 'Squat eksplosif untuk power kaki.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=jump+squat+tutorial',
+            sets: 4,
+            reps: 15,
+            restSeconds: 40,
+          ),
+          WorkoutExercise(
+            name: 'Bulgarian Split Squat',
+            description: 'Latihan unilateral untuk paha dan glute.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial',
+            sets: 4,
+            reps: 10,
+            restSeconds: 45,
+          ),
+          WorkoutExercise(
+            name: 'Wall Sit',
+            description: 'Isometrik untuk daya tahan otot kaki.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=wall+sit+tutorial',
+            sets: 3,
+            reps: 45,
+            restSeconds: 30,
+            isTimed: true,
+          ),
+        ],
+      ),
+      WorkoutProgram(
+        category: 'Free Weight',
+        title: 'Free Weight Chest & Tricep',
+        subtitle: 'Push day sederhana untuk dada dan trisep',
+        targetArea: 'Push',
+        difficulty: 'Intermediate',
+        estimatedMinutes: 26,
+        exercises: [
+          WorkoutExercise(
+            name: 'Dumbbell Press',
+            description: 'Tekan dumbbell ke atas untuk melatih dada.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=dumbbell+press+tutorial',
+            sets: 4,
+            reps: 12,
+            restSeconds: 50,
+          ),
+          WorkoutExercise(
+            name: 'Incline Dumbbell Press',
+            description: 'Fokus upper chest.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial',
+            sets: 3,
+            reps: 10,
+            restSeconds: 45,
+          ),
+          WorkoutExercise(
+            name: 'Tricep Extension',
+            description: 'Latihan trisep dengan dumbbell.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=tricep+extension+tutorial',
+            sets: 3,
+            reps: 12,
+            restSeconds: 40,
+          ),
+        ],
+      ),
+      WorkoutProgram(
+        category: 'Free Weight',
+        title: 'Free Weight Back & Bicep',
+        subtitle: 'Pull day untuk punggung dan lengan',
+        targetArea: 'Pull',
+        difficulty: 'Intermediate',
+        estimatedMinutes: 24,
+        exercises: [
+          WorkoutExercise(
+            name: 'Dumbbell Row',
+            description: 'Melatih punggung atas dan lats.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=dumbbell+row+tutorial',
+            sets: 4,
+            reps: 10,
+            restSeconds: 45,
+          ),
+          WorkoutExercise(
+            name: 'Bicep Curl',
+            description: 'Latihan dasar untuk bisep.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=bicep+curl+tutorial',
+            sets: 4,
+            reps: 12,
+            restSeconds: 35,
+          ),
+          WorkoutExercise(
+            name: 'Hammer Curl',
+            description: 'Variasi curl untuk bisep dan lengan bawah.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=hammer+curl+tutorial',
+            sets: 3,
+            reps: 12,
+            restSeconds: 35,
+          ),
+        ],
+      ),
+      WorkoutProgram(
+        category: 'Mobility',
+        title: 'Mobility Full Body Recovery',
+        subtitle: 'Stretching dan recovery untuk seluruh tubuh',
+        targetArea: 'Recovery',
+        difficulty: 'All Levels',
+        estimatedMinutes: 12,
+        exercises: [
+          WorkoutExercise(
+            name: 'Hamstring Stretch',
+            description: 'Stretch paha belakang.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=hamstring+stretch+tutorial',
+            sets: 3,
+            reps: 30,
+            restSeconds: 20,
+            isTimed: true,
+          ),
+          WorkoutExercise(
+            name: 'Hip Opener',
+            description: 'Membuka pinggul dan fleksibilitas.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=hip+opener+stretch+tutorial',
+            sets: 3,
+            reps: 30,
+            restSeconds: 20,
+            isTimed: true,
+          ),
+          WorkoutExercise(
+            name: 'Shoulder Stretch',
+            description: 'Membantu recovery bahu dan dada.',
+            youtubeUrl: 'https://www.youtube.com/results?search_query=shoulder+stretch+tutorial',
+            sets: 3,
+            reps: 30,
+            restSeconds: 20,
+            isTimed: true,
+          ),
+        ],
+      ),
+    ];
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _restTimer?.cancel();
+    super.dispose();
+  }
+}
+```
+
+---
+
+# 7. WORKOUT DETAIL PAGE — BARU
+
+## `lib/features/activity/workout_detail_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../core/constants/app_colors.dart';
+import 'controllers/workout_controller.dart';
+import 'workout_session_page.dart';
+
+class WorkoutDetailPage extends StatelessWidget {
+  const WorkoutDetailPage({
+    super.key,
+    required this.program,
+  });
+
+  final WorkoutProgram program;
+
+  Future<void> _openTutorial(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final workoutController = context.read<WorkoutController>();
+
+    return Scaffold(
+      appBar: AppBar(title: Text(program.title)),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.16),
+                  blurRadius: 22,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  program.category,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  program.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 24,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  program.subtitle,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  _infoRow('Target Area', program.targetArea),
+                  _infoRow('Difficulty', program.difficulty),
+                  _infoRow('Estimated Duration', '${program.estimatedMinutes} menit'),
+                  _infoRow('Total Exercise', '${program.exercises.length}'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Daftar Exercise',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          ...program.exercises.asMap().entries.map((entry) {
+            final index = entry.key;
+            final exercise = entry.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: AppColors.softCard,
+                            child: Text('${index + 1}'),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              exercise.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        exercise.description,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _miniInfo(
+                        exercise.isTimed ? 'Durasi' : 'Reps',
+                        exercise.isTimed ? '${exercise.reps} detik' : '${exercise.reps} reps',
+                      ),
+                      _miniInfo('Set', '${exercise.sets}'),
+                      _miniInfo('Rest', '${exercise.restSeconds} detik'),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: () => _openTutorial(exercise.youtubeUrl),
+                        icon: const Icon(Icons.play_circle_outline),
+                        label: const Text('Lihat Tutorial'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: () {
+              workoutController.startWorkout(program);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WorkoutSessionPage()),
+              );
+            },
+            child: const Text('Mulai Workout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniInfo(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title, style: const TextStyle(color: AppColors.textSecondary)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+# 8. WORKOUT SESSION PAGE — FINAL
+
+## `lib/features/activity/workout_session_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../core/constants/app_colors.dart';
+import '../auth/controllers/auth_controller.dart';
+import 'controllers/workout_controller.dart';
+import 'workout_result_page.dart';
+
+class WorkoutSessionPage extends StatelessWidget {
+  const WorkoutSessionPage({super.key});
+
+  String _formatTime(int totalSeconds) {
+    final min = totalSeconds ~/ 60;
+    final sec = totalSeconds % 60;
+    return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _openTutorial(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final workoutController = context.watch<WorkoutController>();
+    final authController = context.watch<AuthController>();
+
+    final program = workoutController.currentProgram;
+    final exercise = workoutController.currentExercise;
+
+    if (program == null || exercise == null) {
+      return const Scaffold(
+        body: Center(child: Text('Workout tidak aktif')),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(program.title),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+              ),
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.16),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  program.category,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  exercise.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Exercise ${workoutController.currentExerciseIndex + 1}/${workoutController.totalExercises}',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppColors.softCard,
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(
+                          Icons.ondemand_video_rounded,
+                          size: 56,
+                          color: AppColors.primary,
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Buka tutorial video sebelum atau saat latihan',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    exercise.description,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _infoRow('Set', '${workoutController.currentSet}/${exercise.sets}'),
+                  _infoRow(
+                    exercise.isTimed ? 'Durasi Target' : 'Reps Target',
+                    exercise.isTimed ? '${exercise.reps} detik' : '${exercise.reps} reps',
+                  ),
+                  _infoRow('Rest', '${exercise.restSeconds} detik'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => _openTutorial(exercise.youtubeUrl),
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('Lihat Tutorial'),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            color: workoutController.isResting ? AppColors.softAccent : AppColors.softCard,
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  Text(
+                    workoutController.isResting ? 'Rest Time' : 'Workout Time',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    workoutController.isResting
+                        ? '${workoutController.restRemaining}s'
+                        : _formatTime(workoutController.elapsedSeconds),
+                    style: const TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (!workoutController.isResting)
+            ElevatedButton(
+              onPressed: workoutController.finishCurrentSet,
+              child: Text(exercise.isTimed ? 'Set Selesai' : 'Tandai Set Selesai'),
+            ),
+          if (workoutController.isResting)
+            ElevatedButton(
+              onPressed: workoutController.skipRest,
+              child: const Text('Lewati Rest'),
+            ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: workoutController.pauseWorkout,
+            child: Text(
+              workoutController.isPaused ? 'Lanjutkan Workout' : 'Pause Manual',
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (!workoutController.isWorkoutActive)
+            ElevatedButton(
+              onPressed: () async {
+                if (authController.userEmail == null) return;
+                final success = await workoutController.completeWorkout(
+                  authController.userEmail!,
+                );
+                if (!context.mounted) return;
+                if (success) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const WorkoutResultPage()),
+                  );
+                }
+              },
+              child: const Text('Lihat Hasil Workout'),
+            ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () {
+              workoutController.cancelWorkout();
+              Navigator.pop(context);
+            },
+            child: const Text('Batalkan Workout'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+# 9. WORKOUT RESULT PAGE — BARU
+
+## `lib/features/activity/workout_result_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/constants/app_colors.dart';
+import 'controllers/workout_controller.dart';
+
+class WorkoutResultPage extends StatelessWidget {
+  const WorkoutResultPage({super.key});
+
+  String _formatTime(int totalSeconds) {
+    final min = totalSeconds ~/ 60;
+    final sec = totalSeconds % 60;
+    return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final workoutController = context.watch<WorkoutController>();
+    final result = workoutController.lastCompletedSession;
+
+    if (result == null) {
+      return const Scaffold(
+        body: Center(child: Text('Tidak ada hasil workout')),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Workout Result')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+              ),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: const Column(
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 64),
+                SizedBox(height: 12),
+                Text(
+                  'Workout Selesai',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 24,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Bagus! sesi latihan berhasil diselesaikan',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  _row('Program', result.programName),
+                  _row('Kategori', result.category),
+                  _row('Exercise', '${result.totalExercises}'),
+                  _row('Total Set', '${result.totalSets}'),
+                  _row('Durasi', _formatTime(result.durationSeconds)),
+                  _row('Kalori', '${result.caloriesBurned.toStringAsFixed(0)} kcal'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+              workoutController.clearLastResult();
+              Navigator.popUntil(context, (route) => route.isFirst);
+            },
+            child: const Text('Kembali ke Home'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+# 10. ACTIVITY PAGE — FINAL
+
+## `lib/features/activity/activity_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/constants/app_colors.dart';
+import '../auth/controllers/auth_controller.dart';
+import 'controllers/activity_controller.dart';
+import 'controllers/workout_controller.dart';
+import 'workout_detail_page.dart';
+
+class ActivityPage extends StatefulWidget {
+  const ActivityPage({super.key});
+
+  @override
+  State<ActivityPage> createState() => _ActivityPageState();
+}
+
+class _ActivityPageState extends State<ActivityPage> {
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    _loaded = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userEmail = context.read<AuthController>().userEmail;
+      if (userEmail != null) {
+        context.read<ActivityController>().loadHistory(userEmail);
+        context.read<WorkoutController>().loadHistory(userEmail);
+        context.read<WorkoutController>().loadAchievements(userEmail);
+      }
+    });
+  }
+
+  String _formatDuration(int totalSeconds) {
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    return '${hours.toString().padLeft(2, '0')}:'
+        '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authController = context.watch<AuthController>();
+    final activityController = context.watch<ActivityController>();
+    final workoutController = context.watch<WorkoutController>();
+    final programs = workoutController.getWorkoutPrograms();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Aktivitas & Workout')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.16),
+                  blurRadius: 22,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Outdoor Tracking',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Walking, running, dan cycling berbasis GPS.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: activityController.activityType,
+                    decoration: const InputDecoration(
+                      labelText: 'Tipe Aktivitas Outdoor',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Walking', child: Text('Walking')),
+                      DropdownMenuItem(value: 'Running', child: Text('Running')),
+                      DropdownMenuItem(value: 'Cycling', child: Text('Cycling')),
+                    ],
+                    onChanged: activityController.isTracking
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              activityController.setActivityType(value);
+                            }
+                          },
+                  ),
+                  const SizedBox(height: 14),
+                  _box('Durasi', _formatDuration(activityController.durationSeconds)),
+                  const SizedBox(height: 10),
+                  _box('Jarak', '${activityController.distanceKm.toStringAsFixed(2)} km'),
+                  const SizedBox(height: 10),
+                  _box('Kalori', '${activityController.caloriesBurned.toStringAsFixed(0)} kcal'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (activityController.isTracking) {
+                        if (authController.userEmail != null) {
+                          await activityController.stopTracking(authController.userEmail!);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Aktivitas disimpan')),
+                          );
+                        }
+                      } else {
+                        final started = await activityController.startTracking();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              started
+                                  ? 'Tracking dimulai'
+                                  : 'GPS belum aktif / izin lokasi ditolak',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    child: Text(
+                      activityController.isTracking ? 'Stop Aktivitas' : 'Start Aktivitas',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'Workout Programs',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          ...programs.map((program) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => WorkoutDetailPage(program: program),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: AppColors.softCard,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Icon(Icons.fitness_center, color: AppColors.primary),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              program.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(program.subtitle),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${program.category} • ${program.targetArea} • ${program.difficulty}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 22),
+          const Text(
+            'Achievement',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          if (workoutController.achievements.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  children: const [
+                    Icon(Icons.emoji_events_outlined, size: 36, color: AppColors.textSecondary),
+                    SizedBox(height: 8),
+                    Text('Belum ada achievement'),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...workoutController.achievements.map((item) {
+              final date = DateTime.parse(item.createdAt);
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.emoji_events, color: AppColors.primary),
+                  title: Text(item.title),
+                  subtitle: Text(
+                    '${item.description}\n${DateFormat('dd MMM yyyy, HH:mm').format(date)}',
+                  ),
+                  isThreeLine: true,
+                ),
+              );
+            }),
+          const SizedBox(height: 22),
+          const Text(
+            'Riwayat Workout',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          if (workoutController.history.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  children: const [
+                    Icon(Icons.history_toggle_off, size: 36, color: AppColors.textSecondary),
+                    SizedBox(height: 8),
+                    Text('Belum ada riwayat workout'),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...workoutController.history.map((item) {
+              final date = DateTime.parse(item.createdAt);
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.task_alt, color: AppColors.primary),
+                  title: Text(item.programName),
+                  subtitle: Text(
+                    '${item.category} • ${item.totalSets} set • ${item.caloriesBurned.toStringAsFixed(0)} kcal\n'
+                    '${DateFormat('dd MMM yyyy, HH:mm').format(date)}',
+                  ),
+                  isThreeLine: true,
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _box(String title, String value) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.softCard,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+}
+```
+
+---
+
+# 11. MINI GAME CONTROLLER — FIT DASH
+
+## `lib/features/minigame/controllers/minigame_controller.dart`
+
+```dart
+import 'dart:async';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+
+import '../../../data/models/game_score_model.dart';
+import '../../../data/repositories/workout_repository.dart';
+
+class FallingItem {
+  int lane;
+  double y;
+  bool isHealthy;
+  String emoji;
+
+  FallingItem({
+    required this.lane,
+    required this.y,
+    required this.isHealthy,
+    required this.emoji,
+  });
+}
+
+class MinigameController extends ChangeNotifier {
+  MinigameController({
+    required WorkoutRepository workoutRepository,
+  }) : _workoutRepository = workoutRepository;
+
+  final WorkoutRepository _workoutRepository;
+  final Random _random = Random();
+
+  bool _isPlaying = false;
+  int _score = 0;
+  int _bestScore = 0;
+  int _timeLeft = 45;
+  int _lives = 3;
+  int _playerLane = 1;
+
+  Timer? _gameTimer;
+  Timer? _spawnTimer;
+  Timer? _moveTimer;
+
+  final List<FallingItem> _items = [];
+  List<GameScoreModel> _scores = [];
+
+  bool get isPlaying => _isPlaying;
+  int get score => _score;
+  int get bestScore => _bestScore;
+  int get timeLeft => _timeLeft;
+  int get lives => _lives;
+  int get playerLane => _playerLane;
+  List<FallingItem> get items => List.unmodifiable(_items);
+  List<GameScoreModel> get scores => _scores;
+
+  final List<String> healthyItems = ['🍎', '🥦', '💧', '🍌', '🥚'];
+  final List<String> junkItems = ['🍔', '🍟', '🍩', '🥤'];
+
+  void startGame() {
+    _isPlaying = true;
+    _score = 0;
+    _timeLeft = 45;
+    _lives = 3;
+    _playerLane = 1;
+    _items.clear();
+
+    _gameTimer?.cancel();
+    _spawnTimer?.cancel();
+    _moveTimer?.cancel();
+
+    _gameTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _timeLeft--;
+      if (_timeLeft <= 0 || _lives <= 0) {
+        _finishGame();
+      }
+      notifyListeners();
+    });
+
+    _spawnTimer = Timer.periodic(const Duration(milliseconds: 850), (_) {
+      _spawnItem();
+    });
+
+    _moveTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+      _moveItems();
+    });
+
+    notifyListeners();
+  }
+
+  void moveLeft() {
+    if (!_isPlaying) return;
+    if (_playerLane > 0) {
+      _playerLane--;
+      notifyListeners();
+    }
+  }
+
+  void moveRight() {
+    if (!_isPlaying) return;
+    if (_playerLane < 2) {
+      _playerLane++;
+      notifyListeners();
+    }
+  }
+
+  void _spawnItem() {
+    final isHealthy = _random.nextBool();
+    final emoji = isHealthy
+        ? healthyItems[_random.nextInt(healthyItems.length)]
+        : junkItems[_random.nextInt(junkItems.length)];
+
+    _items.add(
+      FallingItem(
+        lane: _random.nextInt(3),
+        y: 0,
+        isHealthy: isHealthy,
+        emoji: emoji,
+      ),
+    );
+
+    notifyListeners();
+  }
+
+  void _moveItems() {
+    if (!_isPlaying) return;
+
+    for (final item in _items) {
+      item.y += 0.04;
+    }
+
+    final toRemove = <FallingItem>[];
+
+    for (final item in _items) {
+      if (item.y >= 0.85 && item.lane == _playerLane) {
+        if (item.isHealthy) {
+          _score += 10;
+        } else {
+          _score = (_score - 5).clamp(0, 99999);
+          _lives -= 1;
+        }
+        toRemove.add(item);
+      } else if (item.y > 1.05) {
+        if (item.isHealthy) {
+          _lives -= 1;
+        }
+        toRemove.add(item);
+      }
+    }
+
+    _items.removeWhere((item) => toRemove.contains(item));
+
+    if (_lives <= 0) {
+      _finishGame();
+    }
+
+    notifyListeners();
+  }
+
+  void _finishGame() {
+    _gameTimer?.cancel();
+    _spawnTimer?.cancel();
+    _moveTimer?.cancel();
+    _isPlaying = false;
+    if (_score > _bestScore) {
+      _bestScore = _score;
+    }
+    notifyListeners();
+  }
+
+  Future<void> saveScore(String userEmail) async {
+    await _workoutRepository.insertGameScore(
+      GameScoreModel(
+        userEmail: userEmail.trim().toLowerCase(),
+        gameName: 'Fit Dash',
+        score: _score,
+        createdAt: DateTime.now().toIso8601String(),
+      ),
+    );
+    await loadScores(userEmail);
+  }
+
+  Future<void> loadScores(String userEmail) async {
+    _scores = await _workoutRepository.getGameScores(userEmail);
+    if (_scores.isNotEmpty) {
+      _bestScore = _scores.first.score;
+    }
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _gameTimer?.cancel();
+    _spawnTimer?.cancel();
+    _moveTimer?.cancel();
+    super.dispose();
+  }
+}
+```
+
+---
+
+# 12. MINI GAME PAGE — FIT DASH
+
+## `lib/features/minigame/minigame_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/constants/app_colors.dart';
+import '../auth/controllers/auth_controller.dart';
+import 'controllers/minigame_controller.dart';
+
+class MinigamePage extends StatefulWidget {
+  const MinigamePage({super.key});
+
+  @override
+  State<MinigamePage> createState() => _MinigamePageState();
+}
+
+class _MinigamePageState extends State<MinigamePage> {
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    _loaded = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userEmail = context.read<AuthController>().userEmail;
+      if (userEmail != null) {
+        context.read<MinigameController>().loadScores(userEmail);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gameController = context.watch<MinigameController>();
+    final authController = context.watch<AuthController>();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Fit Dash')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+              ),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _topInfo('Score', '${gameController.score}'),
+                _topInfo('Best', '${gameController.bestScore}'),
+                _topInfo('Lives', '${gameController.lives}'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            height: 420,
+            decoration: BoxDecoration(
+              color: AppColors.softCard,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Stack(
+              children: [
+                Row(
+                  children: List.generate(3, (index) {
+                    return Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            right: BorderSide(
+                              color: index == 2 ? Colors.transparent : AppColors.border,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                ...gameController.items.map((item) {
+                  return Positioned(
+                    top: item.y * 360,
+                    left: item.lane * ((MediaQuery.of(context).size.width - 32) / 3) + 40,
+                    child: Text(
+                      item.emoji,
+                      style: const TextStyle(fontSize: 34),
+                    ),
+                  );
+                }),
+                Positioned(
+                  bottom: 18,
+                  left: gameController.playerLane * ((MediaQuery.of(context).size.width - 32) / 3) + 30,
+                  child: const Text(
+                    '🏃',
+                    style: TextStyle(fontSize: 46),
+                  ),
+                ),
+                if (!gameController.isPlaying)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                      child: Center(
+                        child: ElevatedButton(
+                          onPressed: gameController.startGame,
+                          child: const Text('Start Game'),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: gameController.isPlaying ? gameController.moveLeft : null,
+                  icon: const Icon(Icons.arrow_left),
+                  label: const Text('Kiri'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: gameController.isPlaying ? gameController.moveRight : null,
+                  icon: const Icon(Icons.arrow_right),
+                  label: const Text('Kanan'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (!gameController.isPlaying && gameController.score > 0)
+            ElevatedButton(
+              onPressed: () async {
+                if (authController.userEmail != null) {
+                  await gameController.saveScore(authController.userEmail!);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('High score disimpan')),
+                  );
+                }
+              },
+              child: const Text('Simpan Score'),
+            ),
+          const SizedBox(height: 18),
+          const Text(
+            'High Score',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          if (gameController.scores.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  children: const [
+                    Icon(Icons.sports_esports_outlined, size: 36, color: AppColors.textSecondary),
+                    SizedBox(height: 8),
+                    Text('Belum ada high score'),
+                  ],
+                ),
+              ),
+            )
+          else
+            ...gameController.scores.take(10).map((score) {
+              return Card(
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: AppColors.softCard,
+                    child: Icon(Icons.emoji_events, color: AppColors.primary),
+                  ),
+                  title: Text(score.gameName),
+                  subtitle: Text(score.createdAt.substring(0, 10)),
+                  trailing: Text(
+                    '${score.score}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _topInfo(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 22,
+          ),
+        ),
+      ],
+    );
+  }
+}
+```
+
+---
+
+# 13. MAIN PROVIDER
+
+## `lib/main.dart`
+
+Pastikan ada import:
+
+```dart
+import 'data/repositories/workout_repository.dart';
+import 'features/activity/controllers/workout_controller.dart';
+import 'features/minigame/controllers/minigame_controller.dart';
+```
+
+Dan di `main()`:
+
+```dart
+final workoutRepository = WorkoutRepository(appDatabase: appDatabase);
+```
+
+Lalu di `providers`:
+
+```dart
+ChangeNotifierProvider<WorkoutController>(
+  create: (_) => WorkoutController(
+    workoutRepository: workoutRepository,
+  ),
+),
+ChangeNotifierProvider<MinigameController>(
+  create: (_) => MinigameController(
+    workoutRepository: workoutRepository,
+  ),
+),
+```
+
+---
+
+# 14. HASIL AKHIR
+
+## Workout
+
+* program tidak langsung start
+* ada halaman detail dulu
+* ada tutorial per exercise
+* session tidak bisa cheat dengan tombol selesai instan
+* rest timer otomatis
+* pause manual
+* hasil workout tampil rapi
+* history dan achievement tersimpan
+
+## Game
+
+* bukan tap random lagi
+* ada lane
+* ada gerak kiri kanan
+* item turun dari atas
+* score
+* lives
+* game over
+* high score
+
+---
+
+# 15. LANGKAH SETELAH TEMPEL KODE
+
+1. hapus build cache / db lama bila perlu
+2. jalankan:
+
+```bash
+flutter clean
+flutter pub get
+flutter run
+```
+
+3. tes:
+
+* Activity → pilih program → lihat detail → mulai workout
+* selesaikan seluruh exercise → result page
+* Home/Game → start → gerak kiri/kanan → simpan score
+
+---
+
+# 16. CATATAN JUJUR
+
+### Yang masih bisa ditingkatkan nanti
+
+* embed YouTube di dalam app, bukan buka browser
+* game pakai gyroscope
+* animasi item jatuh lebih halus / custom painter
+* tutorial video thumbnail
+
+Tapi versi ini sudah:
+
+* jauh lebih logis
+* jauh lebih layak dipakai
+* jauh lebih cocok untuk tugas akhir
+* tidak terasa asal jadi

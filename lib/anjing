@@ -1,0 +1,1180 @@
+# FitLife Stage 1 — Flutter Auth Scaffold
+
+Di bawah ini adalah fondasi implementasi dari `main.dart` sampai `login` dan `register`, dibuat agar **mudah dijalankan, mudah debugging, dan mudah dilanjutkan**.
+
+## Keputusan arsitektur tahap awal
+
+### Auth awal
+
+* login dengan **email + password**
+* register dengan **email + password + konfirmasi password**
+* session sederhana dengan `flutter_secure_storage`
+* **belum OTP dulu** di tahap ini
+
+### Tentang OTP email
+
+**Mungkin dan bagus**, tetapi lebih cocok sebagai **Tahap 2** setelah auth dasar stabil.
+
+Saran implementasi OTP:
+
+* OTP untuk verifikasi email setelah register, atau
+* OTP untuk reset password
+
+Bukan untuk login utama di tahap awal.
+
+---
+
+## 1. `pubspec.yaml` dependencies
+
+Tambahkan ini dulu:
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  go_router: ^14.2.0
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.2.3
+```
+
+---
+
+## 2. Struktur file tahap 1
+
+```text
+lib/
+  main.dart
+  app.dart
+
+  core/
+    constants/
+      app_colors.dart
+      app_strings.dart
+    theme/
+      app_theme.dart
+    routes/
+      app_routes.dart
+      app_router.dart
+    utils/
+      validators.dart
+    services/
+      secure_storage_service.dart
+
+  features/
+    splash/
+      splash_page.dart
+    auth/
+      controllers/
+        auth_controller.dart
+      pages/
+        login_page.dart
+        register_page.dart
+      widgets/
+        auth_text_field.dart
+        auth_primary_button.dart
+    home/
+      home_page.dart
+    activity/
+      activity_page.dart
+    nutrition/
+      nutrition_page.dart
+    shop/
+      shop_page.dart
+    profile/
+      profile_page.dart
+    root/
+      root_page.dart
+
+  shared/
+    widgets/
+      custom_bottom_nav.dart
+```
+
+---
+
+## 3. `lib/main.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'app.dart';
+import 'core/services/secure_storage_service.dart';
+import 'features/auth/controllers/auth_controller.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final secureStorageService = SecureStorageService();
+  final authController = AuthController(secureStorageService);
+  await authController.initialize();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthController>.value(value: authController),
+      ],
+      child: const FitLifeApp(),
+    ),
+  );
+}
+```
+
+---
+
+## 4. `lib/app.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'core/routes/app_router.dart';
+import 'core/theme/app_theme.dart';
+import 'features/auth/controllers/auth_controller.dart';
+
+class FitLifeApp extends StatelessWidget {
+  const FitLifeApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authController = context.watch<AuthController>();
+    final router = AppRouter.router(authController);
+
+    return MaterialApp.router(
+      title: 'FitLife',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      routerConfig: router,
+    );
+  }
+}
+```
+
+---
+
+## 5. `lib/core/constants/app_colors.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class AppColors {
+  static const Color primary = Color(0xFF2E7D32);
+  static const Color primaryLight = Color(0xFF4CAF50);
+  static const Color olive = Color(0xFF6B8E23);
+  static const Color sage = Color(0xFF9CAF88);
+  static const Color background = Color(0xFFF5F7F5);
+  static const Color surface = Colors.white;
+  static const Color textPrimary = Color(0xFF1E1E1E);
+  static const Color textSecondary = Color(0xFF5F6368);
+  static const Color error = Color(0xFFD32F2F);
+}
+```
+
+---
+
+## 6. `lib/core/constants/app_strings.dart`
+
+```dart
+class AppStrings {
+  static const appName = 'FitLife';
+  static const loginTitle = 'Welcome Back';
+  static const loginSubtitle = 'Masuk untuk melanjutkan perjalanan fitness-mu';
+  static const registerTitle = 'Create Account';
+  static const registerSubtitle = 'Daftar untuk mulai hidup lebih aktif dan sehat';
+}
+```
+
+---
+
+## 7. `lib/core/theme/app_theme.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+import '../constants/app_colors.dart';
+
+class AppTheme {
+  static ThemeData get lightTheme {
+    return ThemeData(
+      useMaterial3: true,
+      scaffoldBackgroundColor: AppColors.background,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primary,
+        primary: AppColors.primary,
+        secondary: AppColors.primaryLight,
+        surface: AppColors.surface,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.4),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: AppColors.error),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(double.infinity, 52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      cardTheme: CardTheme(
+        color: Colors.white,
+        elevation: 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 8. `lib/core/routes/app_routes.dart`
+
+```dart
+class AppRoutes {
+  static const splash = '/';
+  static const login = '/login';
+  static const register = '/register';
+  static const root = '/root';
+}
+```
+
+---
+
+## 9. `lib/core/services/secure_storage_service.dart`
+
+```dart
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+class SecureStorageService {
+  static const _storage = FlutterSecureStorage();
+  static const _sessionKey = 'session_token';
+  static const _emailKey = 'session_email';
+
+  Future<void> saveSession({required String token, required String email}) async {
+    await _storage.write(key: _sessionKey, value: token);
+    await _storage.write(key: _emailKey, value: email);
+  }
+
+  Future<String?> getSessionToken() async {
+    return _storage.read(key: _sessionKey);
+  }
+
+  Future<String?> getSessionEmail() async {
+    return _storage.read(key: _emailKey);
+  }
+
+  Future<void> clearSession() async {
+    await _storage.delete(key: _sessionKey);
+    await _storage.delete(key: _emailKey);
+  }
+}
+```
+
+---
+
+## 10. `lib/core/utils/validators.dart`
+
+```dart
+class Validators {
+  static String? requiredField(String? value, {String fieldName = 'Field'}) {
+    if (value == null || value.trim().isEmpty) {
+      return '$fieldName wajib diisi';
+    }
+    return null;
+  }
+
+  static String? email(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Email wajib diisi';
+    }
+
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+    if (!emailRegex.hasMatch(value.trim())) {
+      return 'Format email tidak valid';
+    }
+
+    return null;
+  }
+
+  static String? password(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Password wajib diisi';
+    }
+    if (value.length < 6) {
+      return 'Password minimal 6 karakter';
+    }
+    return null;
+  }
+
+  static String? confirmPassword(String? value, String password) {
+    if (value == null || value.isEmpty) {
+      return 'Konfirmasi password wajib diisi';
+    }
+    if (value != password) {
+      return 'Konfirmasi password tidak sama';
+    }
+    return null;
+  }
+}
+```
+
+---
+
+## 11. `lib/features/auth/controllers/auth_controller.dart`
+
+```dart
+import 'package:flutter/foundation.dart';
+
+import '../../../core/services/secure_storage_service.dart';
+
+class AuthController extends ChangeNotifier {
+  AuthController(this._secureStorageService);
+
+  final SecureStorageService _secureStorageService;
+
+  bool _isLoggedIn = false;
+  bool _isInitialized = false;
+  String? _userEmail;
+
+  bool get isLoggedIn => _isLoggedIn;
+  bool get isInitialized => _isInitialized;
+  String? get userEmail => _userEmail;
+
+  Future<void> initialize() async {
+    final token = await _secureStorageService.getSessionToken();
+    final email = await _secureStorageService.getSessionEmail();
+
+    _isLoggedIn = token != null && token.isNotEmpty;
+    _userEmail = email;
+    _isInitialized = true;
+    notifyListeners();
+  }
+
+  Future<bool> login({required String email, required String password}) async {
+    // Tahap awal: dummy login
+    // Nanti diganti dengan validasi database + hashing password
+    if (email.trim().isEmpty || password.trim().isEmpty) return false;
+
+    await _secureStorageService.saveSession(
+      token: 'dummy_session_token_${DateTime.now().millisecondsSinceEpoch}',
+      email: email.trim(),
+    );
+
+    _isLoggedIn = true;
+    _userEmail = email.trim();
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> register({
+    required String email,
+    required String password,
+  }) async {
+    // Tahap awal: dummy register
+    // Nanti disambungkan ke local database
+    if (email.trim().isEmpty || password.trim().isEmpty) return false;
+    return true;
+  }
+
+  Future<void> logout() async {
+    await _secureStorageService.clearSession();
+    _isLoggedIn = false;
+    _userEmail = null;
+    notifyListeners();
+  }
+}
+```
+
+---
+
+## 12. `lib/core/routes/app_router.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../features/auth/controllers/auth_controller.dart';
+import '../../features/auth/pages/login_page.dart';
+import '../../features/auth/pages/register_page.dart';
+import '../../features/root/root_page.dart';
+import '../../features/splash/splash_page.dart';
+import 'app_routes.dart';
+
+class AppRouter {
+  static GoRouter router(AuthController authController) {
+    return GoRouter(
+      initialLocation: AppRoutes.splash,
+      refreshListenable: authController,
+      redirect: (context, state) {
+        if (!authController.isInitialized) return AppRoutes.splash;
+
+        final isAuthRoute = state.matchedLocation == AppRoutes.login ||
+            state.matchedLocation == AppRoutes.register;
+
+        if (authController.isLoggedIn && isAuthRoute) {
+          return AppRoutes.root;
+        }
+
+        if (!authController.isLoggedIn &&
+            state.matchedLocation == AppRoutes.root) {
+          return AppRoutes.login;
+        }
+
+        return null;
+      },
+      routes: [
+        GoRoute(
+          path: AppRoutes.splash,
+          builder: (context, state) => const SplashPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.login,
+          builder: (context, state) => const LoginPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.register,
+          builder: (context, state) => const RegisterPage(),
+        ),
+        GoRoute(
+          path: AppRoutes.root,
+          builder: (context, state) => const RootPage(),
+        ),
+      ],
+    );
+  }
+}
+```
+
+---
+
+## 13. `lib/features/splash/splash_page.dart`
+
+```dart
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../../core/constants/app_colors.dart';
+import '../../core/routes/app_routes.dart';
+import '../auth/controllers/auth_controller.dart';
+
+class SplashPage extends StatefulWidget {
+  const SplashPage({super.key});
+
+  @override
+  State<SplashPage> createState() => _SplashPageState();
+}
+
+class _SplashPageState extends State<SplashPage> {
+  @override
+  void initState() {
+    super.initState();
+    _handleNavigation();
+  }
+
+  Future<void> _handleNavigation() async {
+    await Future.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+
+    final authController = context.read<AuthController>();
+    if (authController.isLoggedIn) {
+      context.go(AppRoutes.root);
+    } else {
+      context.go(AppRoutes.login);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [AppColors.primary, AppColors.primaryLight],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.spa_rounded, color: Colors.white, size: 70),
+              SizedBox(height: 16),
+              Text(
+                'FitLife',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Move better, live healthier',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 14. `lib/features/auth/widgets/auth_text_field.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class AuthTextField extends StatelessWidget {
+  const AuthTextField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.obscureText = false,
+    this.keyboardType,
+    this.validator,
+    this.prefixIcon,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? hint;
+  final bool obscureText;
+  final TextInputType? keyboardType;
+  final String? Function(String?)? validator;
+  final IconData? prefixIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: prefixIcon != null ? Icon(prefixIcon) : null,
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 15. `lib/features/auth/widgets/auth_primary_button.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class AuthPrimaryButton extends StatelessWidget {
+  const AuthPrimaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.isLoading = false,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: isLoading ? null : onPressed,
+      child: isLoading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : Text(label),
+    );
+  }
+}
+```
+
+---
+
+## 16. `lib/features/auth/pages/login_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/app_strings.dart';
+import '../../../core/routes/app_routes.dart';
+import '../../../core/utils/validators.dart';
+import '../controllers/auth_controller.dart';
+import '../widgets/auth_primary_button.dart';
+import '../widgets/auth_text_field.dart';
+
+class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    final authController = context.read<AuthController>();
+    final success = await authController.login(
+      email: _emailController.text,
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (success) {
+      context.go(AppRoutes.root);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login gagal')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.spa_rounded, size: 36, color: AppColors.primary),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    AppStrings.loginTitle,
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    AppStrings.loginSubtitle,
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 32),
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        AuthTextField(
+                          controller: _emailController,
+                          label: 'Email',
+                          hint: 'contoh@email.com',
+                          keyboardType: TextInputType.emailAddress,
+                          prefixIcon: Icons.email_outlined,
+                          validator: Validators.email,
+                        ),
+                        const SizedBox(height: 16),
+                        AuthTextField(
+                          controller: _passwordController,
+                          label: 'Password',
+                          hint: 'Masukkan password',
+                          obscureText: true,
+                          prefixIcon: Icons.lock_outline,
+                          validator: Validators.password,
+                        ),
+                        const SizedBox(height: 24),
+                        AuthPrimaryButton(
+                          label: 'Login',
+                          isLoading: _isLoading,
+                          onPressed: _submit,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('Belum punya akun? '),
+                      TextButton(
+                        onPressed: () => context.push(AppRoutes.register),
+                        child: const Text('Daftar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 17. `lib/features/auth/pages/register_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/app_strings.dart';
+import '../../../core/routes/app_routes.dart';
+import '../../../core/utils/validators.dart';
+import '../controllers/auth_controller.dart';
+import '../widgets/auth_primary_button.dart';
+import '../widgets/auth_text_field.dart';
+
+class RegisterPage extends StatefulWidget {
+  const RegisterPage({super.key});
+
+  @override
+  State<RegisterPage> createState() => _RegisterPageState();
+}
+
+class _RegisterPageState extends State<RegisterPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    final authController = context.read<AuthController>();
+    final success = await authController.register(
+      email: _emailController.text,
+      password: _passwordController.text,
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registrasi berhasil, silakan login')),
+      );
+      context.go(AppRoutes.login);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registrasi gagal')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    AppStrings.registerTitle,
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    AppStrings.registerSubtitle,
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 32),
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        AuthTextField(
+                          controller: _emailController,
+                          label: 'Email',
+                          hint: 'contoh@email.com',
+                          keyboardType: TextInputType.emailAddress,
+                          prefixIcon: Icons.email_outlined,
+                          validator: Validators.email,
+                        ),
+                        const SizedBox(height: 16),
+                        AuthTextField(
+                          controller: _passwordController,
+                          label: 'Password',
+                          hint: 'Minimal 6 karakter',
+                          obscureText: true,
+                          prefixIcon: Icons.lock_outline,
+                          validator: Validators.password,
+                        ),
+                        const SizedBox(height: 16),
+                        AuthTextField(
+                          controller: _confirmPasswordController,
+                          label: 'Konfirmasi Password',
+                          hint: 'Ulangi password',
+                          obscureText: true,
+                          prefixIcon: Icons.lock_reset_outlined,
+                          validator: (value) => Validators.confirmPassword(
+                            value,
+                            _passwordController.text,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        AuthPrimaryButton(
+                          label: 'Daftar',
+                          isLoading: _isLoading,
+                          onPressed: _submit,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 18. `lib/features/root/root_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+import '../../shared/widgets/custom_bottom_nav.dart';
+import '../activity/activity_page.dart';
+import '../home/home_page.dart';
+import '../nutrition/nutrition_page.dart';
+import '../profile/profile_page.dart';
+import '../shop/shop_page.dart';
+
+class RootPage extends StatefulWidget {
+  const RootPage({super.key});
+
+  @override
+  State<RootPage> createState() => _RootPageState();
+}
+
+class _RootPageState extends State<RootPage> {
+  int _currentIndex = 0;
+
+  final List<Widget> _pages = const [
+    HomePage(),
+    ActivityPage(),
+    NutritionPage(),
+    ShopPage(),
+    ProfilePage(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _pages[_currentIndex],
+      bottomNavigationBar: CustomBottomNav(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 19. `lib/shared/widgets/custom_bottom_nav.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+import '../../core/constants/app_colors.dart';
+
+class CustomBottomNav extends StatelessWidget {
+  const CustomBottomNav({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return NavigationBar(
+      selectedIndex: currentIndex,
+      onDestinationSelected: onTap,
+      indicatorColor: AppColors.primary.withOpacity(0.15),
+      destinations: const [
+        NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+        NavigationDestination(icon: Icon(Icons.directions_run_outlined), label: 'Aktivitas'),
+        NavigationDestination(icon: Icon(Icons.restaurant_menu_outlined), label: 'Nutrisi'),
+        NavigationDestination(icon: Icon(Icons.shopping_bag_outlined), label: 'Shop'),
+        NavigationDestination(icon: Icon(Icons.person_outline), label: 'Profil'),
+      ],
+    );
+  }
+}
+```
+
+---
+
+## 20. Placeholder pages
+
+### `lib/features/home/home_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Home Page')),
+    );
+  }
+}
+```
+
+### `lib/features/activity/activity_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class ActivityPage extends StatelessWidget {
+  const ActivityPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Activity Page')),
+    );
+  }
+}
+```
+
+### `lib/features/nutrition/nutrition_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class NutritionPage extends StatelessWidget {
+  const NutritionPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Nutrition Page')),
+    );
+  }
+}
+```
+
+### `lib/features/shop/shop_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+
+class ShopPage extends StatelessWidget {
+  const ShopPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(child: Text('Shop Page')),
+    );
+  }
+}
+```
+
+### `lib/features/profile/profile_page.dart`
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../auth/controllers/auth_controller.dart';
+
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final authController = context.watch<AuthController>();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Profil')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircleAvatar(radius: 36, child: Icon(Icons.person, size: 36)),
+            const SizedBox(height: 16),
+            Text(authController.userEmail ?? '-'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => authController.logout(),
+              child: const Text('Logout'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 21. Debug checklist tahap ini
+
+Kalau project belum jalan, cek urutan ini:
+
+1. `flutter pub get`
+2. cek semua import
+3. pastikan `provider` dan `go_router` terpasang
+4. cek typo pada route path
+5. cek `SecureStorageService` sudah benar
+6. jalankan dulu tanpa database, tanpa biometric, tanpa API
+
+---
+
+## 22. Tentang OTP email — rekomendasi implementasi
+
+### Sangat memungkinkan, tapi jangan dijadikan fondasi tahap 1
+
+Saran terbaik:
+
+#### Tahap 2A
+
+* user register dengan email + password
+* sistem mengirim OTP ke email
+* user masuk halaman verifikasi OTP
+* setelah OTP benar, akun dianggap aktif
+
+#### Tahap 2B
+
+* fitur lupa password dengan OTP email
+
+### Kenapa tidak langsung sekarang?
+
+Karena OTP email perlu:
+
+* backend / server / cloud function
+* layanan email sender
+* penyimpanan OTP
+* expiry time
+* resend logic
+
+Kalau langsung dibuat dari awal, debug auth akan lebih berat.
+
+---
+
+## 23. Rekomendasi keputusan sekarang
+
+Untuk build dari bawah ke atas, pilih ini dulu:
+
+* **Email + password** sebagai auth utama
+* **OTP email** dijadikan fitur verifikasi lanjutan setelah auth dasar selesai
+
+Ini paling aman, paling rapi, dan paling mudah dikembangkan.
+
+---
+
+## 24. Langkah setelah scaffold ini
+
+Setelah semua file di atas jalan, lanjut ke tahap berikut:
+
+1. simpan user ke SQLite
+2. hashing password
+3. validasi login dari database
+4. biometric login
+5. halaman verifikasi OTP bila ingin ditambahkan

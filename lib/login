@@ -1,0 +1,578 @@
+# FitLife Stage 2 — SQLite Auth Real (Register & Login via App)
+
+Tahap ini mengganti auth dummy menjadi auth sungguhan berbasis:
+
+* **SQLite** untuk menyimpan user
+* **hash password** sebelum disimpan
+* **session** di `flutter_secure_storage`
+
+> Catatan penting: untuk hashing password di Flutter murni, paket yang paling mudah dipakai biasanya `crypto` untuk SHA-256. Ini **lebih baik daripada plain text**, tetapi untuk produksi idealnya gunakan bcrypt/Argon2. Untuk tugas kampus tahap awal, SHA-256 + salt masih cukup untuk demo fondasi auth. Nanti bisa kita upgrade.
+
+---
+
+## 1. Tambah dependency baru di `pubspec.yaml`
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  go_router: ^14.2.0
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.2.3
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  crypto: ^3.0.3
+```
+
+Lalu jalankan:
+
+```bash
+flutter pub get
+```
+
+---
+
+## 2. Tambah struktur file baru
+
+```text
+lib/
+  data/
+    local/
+      db/
+        app_database.dart
+        table_names.dart
+    models/
+      user_model.dart
+    repositories/
+      auth_repository.dart
+
+  core/
+    services/
+      crypto_service.dart
+```
+
+---
+
+## 3. `lib/data/local/db/table_names.dart`
+
+```dart
+class TableNames {
+  static const users = 'users';
+}
+```
+
+---
+
+## 4. `lib/data/models/user_model.dart`
+
+```dart
+class UserModel {
+  final int? id;
+  final String email;
+  final String passwordHash;
+  final String salt;
+  final String createdAt;
+
+  UserModel({
+    this.id,
+    required this.email,
+    required this.passwordHash,
+    required this.salt,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'email': email,
+      'password_hash': passwordHash,
+      'salt': salt,
+      'created_at': createdAt,
+    };
+  }
+
+  factory UserModel.fromMap(Map<String, dynamic> map) {
+    return UserModel(
+      id: map['id'] as int?,
+      email: map['email'] as String,
+      passwordHash: map['password_hash'] as String,
+      salt: map['salt'] as String,
+      createdAt: map['created_at'] as String,
+    );
+  }
+}
+```
+
+---
+
+## 5. `lib/data/local/db/app_database.dart`
+
+```dart
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+
+import 'table_names.dart';
+
+class AppDatabase {
+  AppDatabase._();
+
+  static final AppDatabase instance = AppDatabase._();
+  static Database? _database;
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  Future<Database> _initDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'fitlife.db');
+
+    return openDatabase(
+      path,
+      version: 1,
+      onCreate: _onCreate,
+    );
+  }
+
+  Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE ${TableNames.users} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+  }
+}
+```
+
+---
+
+## 6. `lib/core/services/crypto_service.dart`
+
+```dart
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
+
+class CryptoService {
+  String generateSalt([int length = 16]) {
+    const chars =
+        'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final random = Random.secure();
+
+    return List.generate(
+      length,
+      (_) => chars[random.nextInt(chars.length)],
+    ).join();
+  }
+
+  String hashPassword({required String password, required String salt}) {
+    final bytes = utf8.encode('$password$salt');
+    return sha256.convert(bytes).toString();
+  }
+}
+```
+
+---
+
+## 7. `lib/data/repositories/auth_repository.dart`
+
+```dart
+import 'package:sqflite/sqflite.dart';
+
+import '../../core/services/crypto_service.dart';
+import '../local/db/app_database.dart';
+import '../local/db/table_names.dart';
+import '../models/user_model.dart';
+
+class AuthRepository {
+  AuthRepository({
+    required AppDatabase appDatabase,
+    required CryptoService cryptoService,
+  })  : _appDatabase = appDatabase,
+        _cryptoService = cryptoService;
+
+  final AppDatabase _appDatabase;
+  final CryptoService _cryptoService;
+
+  Future<UserModel?> getUserByEmail(String email) async {
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.users,
+      where: 'email = ?',
+      whereArgs: [email.trim().toLowerCase()],
+      limit: 1,
+    );
+
+    if (result.isEmpty) return null;
+    return UserModel.fromMap(result.first);
+  }
+
+  Future<bool> register({
+    required String email,
+    required String password,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+
+    final existingUser = await getUserByEmail(normalizedEmail);
+    if (existingUser != null) {
+      return false;
+    }
+
+    final salt = _cryptoService.generateSalt();
+    final passwordHash = _cryptoService.hashPassword(
+      password: password,
+      salt: salt,
+    );
+
+    final user = UserModel(
+      email: normalizedEmail,
+      passwordHash: passwordHash,
+      salt: salt,
+      createdAt: DateTime.now().toIso8601String(),
+    );
+
+    final db = await _appDatabase.database;
+    final inserted = await db.insert(
+      TableNames.users,
+      user.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.abort,
+    );
+
+    return inserted > 0;
+  }
+
+  Future<bool> login({
+    required String email,
+    required String password,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final user = await getUserByEmail(normalizedEmail);
+
+    if (user == null) return false;
+
+    final hashedInput = _cryptoService.hashPassword(
+      password: password,
+      salt: user.salt,
+    );
+
+    return hashedInput == user.passwordHash;
+  }
+}
+```
+
+---
+
+## 8. Update `lib/main.dart`
+
+Ganti isi `main.dart` menjadi:
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'app.dart';
+import 'core/services/crypto_service.dart';
+import 'core/services/secure_storage_service.dart';
+import 'data/local/db/app_database.dart';
+import 'data/repositories/auth_repository.dart';
+import 'features/auth/controllers/auth_controller.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  final secureStorageService = SecureStorageService();
+  final cryptoService = CryptoService();
+  final appDatabase = AppDatabase.instance;
+
+  final authRepository = AuthRepository(
+    appDatabase: appDatabase,
+    cryptoService: cryptoService,
+  );
+
+  final authController = AuthController(
+    secureStorageService: secureStorageService,
+    authRepository: authRepository,
+  );
+
+  await authController.initialize();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthController>.value(value: authController),
+      ],
+      child: const FitLifeApp(),
+    ),
+  );
+}
+```
+
+---
+
+## 9. Update `lib/features/auth/controllers/auth_controller.dart`
+
+Ganti seluruh isi file menjadi:
+
+```dart
+import 'package:flutter/foundation.dart';
+
+import '../../../core/services/secure_storage_service.dart';
+import '../../../data/repositories/auth_repository.dart';
+
+class AuthController extends ChangeNotifier {
+  AuthController({
+    required SecureStorageService secureStorageService,
+    required AuthRepository authRepository,
+  })  : _secureStorageService = secureStorageService,
+        _authRepository = authRepository;
+
+  final SecureStorageService _secureStorageService;
+  final AuthRepository _authRepository;
+
+  bool _isLoggedIn = false;
+  bool _isInitialized = false;
+  String? _userEmail;
+  String? _errorMessage;
+
+  bool get isLoggedIn => _isLoggedIn;
+  bool get isInitialized => _isInitialized;
+  String? get userEmail => _userEmail;
+  String? get errorMessage => _errorMessage;
+
+  Future<void> initialize() async {
+    final token = await _secureStorageService.getSessionToken();
+    final email = await _secureStorageService.getSessionEmail();
+
+    _isLoggedIn = token != null && token.isNotEmpty;
+    _userEmail = email;
+    _isInitialized = true;
+    notifyListeners();
+  }
+
+  Future<bool> register({
+    required String email,
+    required String password,
+  }) async {
+    _errorMessage = null;
+
+    try {
+      final success = await _authRepository.register(
+        email: email,
+        password: password,
+      );
+
+      if (!success) {
+        _errorMessage = 'Email sudah terdaftar';
+        notifyListeners();
+        return false;
+      }
+
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Terjadi kesalahan saat registrasi';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> login({
+    required String email,
+    required String password,
+  }) async {
+    _errorMessage = null;
+
+    try {
+      final success = await _authRepository.login(
+        email: email,
+        password: password,
+      );
+
+      if (!success) {
+        _errorMessage = 'Email atau password salah';
+        notifyListeners();
+        return false;
+      }
+
+      final normalizedEmail = email.trim().toLowerCase();
+
+      await _secureStorageService.saveSession(
+        token: 'session_${DateTime.now().millisecondsSinceEpoch}',
+        email: normalizedEmail,
+      );
+
+      _isLoggedIn = true;
+      _userEmail = normalizedEmail;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Terjadi kesalahan saat login';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> logout() async {
+    await _secureStorageService.clearSession();
+    _isLoggedIn = false;
+    _userEmail = null;
+    notifyListeners();
+  }
+}
+```
+
+---
+
+## 10. Update `lib/features/auth/pages/login_page.dart`
+
+Cukup ganti bagian `SnackBar` gagal agar memakai pesan dari controller.
+
+Cari bagian ini:
+
+```dart
+if (success) {
+  context.go(AppRoutes.root);
+} else {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Login gagal')),
+  );
+}
+```
+
+Ganti menjadi:
+
+```dart
+if (success) {
+  context.go(AppRoutes.root);
+} else {
+  final message = authController.errorMessage ?? 'Login gagal';
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message)),
+  );
+}
+```
+
+---
+
+## 11. Update `lib/features/auth/pages/register_page.dart`
+
+Cari bagian ini:
+
+```dart
+if (success) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Registrasi berhasil, silakan login')),
+  );
+  context.go(AppRoutes.login);
+} else {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Registrasi gagal')),
+  );
+}
+```
+
+Ganti menjadi:
+
+```dart
+if (success) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(content: Text('Registrasi berhasil, silakan login')),
+  );
+  context.go(AppRoutes.login);
+} else {
+  final message = authController.errorMessage ?? 'Registrasi gagal';
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message)),
+  );
+}
+```
+
+---
+
+## 12. Cara tes tahap ini
+
+### Tes register
+
+1. buka app
+2. masuk ke halaman register
+3. daftar dengan email dan password
+4. harus muncul `Registrasi berhasil`
+5. coba daftar lagi dengan email sama
+6. harus muncul `Email sudah terdaftar`
+
+### Tes login
+
+1. login dengan email yang sudah didaftarkan
+2. jika password benar -> masuk root page
+3. jika password salah -> muncul `Email atau password salah`
+
+### Tes session
+
+1. login berhasil
+2. tutup aplikasi
+3. buka lagi
+4. harus tetap masuk root page jika session masih ada
+
+### Tes logout
+
+1. klik logout di profile
+2. harus kembali ke login page
+
+---
+
+## 13. Jika muncul error umum
+
+### Error SQLite plugin / platform
+
+Jalankan:
+
+```bash
+flutter clean
+flutter pub get
+flutter run
+```
+
+### Error tabel tidak berubah setelah edit schema
+
+Kalau kamu mengubah schema tabel setelah app pernah jalan, database lama masih tersimpan.
+
+Solusi paling mudah saat development:
+
+* uninstall app dari emulator/device
+* lalu run lagi
+
+Atau ganti `version` database ke `2` dan tambahkan migrasi.
+
+---
+
+## 14. Kenapa ini sudah bagus untuk tahap auth?
+
+Dengan tahap ini kamu sudah punya:
+
+* register via app
+* login via app
+* email unik
+* password tidak disimpan plain text
+* session tersimpan aman
+* fondasi siap untuk biometric
+* fondasi siap untuk OTP
+
+---
+
+## 15. Langkah setelah ini
+
+Setelah tahap ini stabil, paling ideal lanjut:
+
+1. tambah **biometric login**
+2. tambah field profil user dasar
+3. tambah halaman profile yang lebih lengkap
+4. baru setelah itu masuk OTP email atau forgot password
