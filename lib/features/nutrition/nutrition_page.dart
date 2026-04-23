@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../data/models/food_item_model.dart';
+import '../../data/models/nutrition_log_model.dart';
 import '../auth/controllers/auth_controller.dart';
 import 'controllers/nutrition_controller.dart';
 
@@ -16,6 +17,7 @@ class NutritionPage extends StatefulWidget {
 
 class _NutritionPageState extends State<NutritionPage> {
   final _searchController = TextEditingController();
+  bool _loaded = false;
 
   static const _mealTypes = [
     'Sarapan',
@@ -27,10 +29,15 @@ class _NutritionPageState extends State<NutritionPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final userEmail = context.read<AuthController>().userEmail;
-    if (userEmail != null) {
-      context.read<NutritionController>().loadDailyData(userEmail);
-    }
+    if (_loaded) return;
+    _loaded = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userEmail = context.read<AuthController>().userEmail;
+      if (userEmail != null) {
+        context.read<NutritionController>().loadDailyData(userEmail);
+      }
+    });
   }
 
   @override
@@ -74,7 +81,7 @@ class _NutritionPageState extends State<NutritionPage> {
         multiplier = 1.375;
     }
 
-    double tdee = bmr * multiplier;
+    final tdee = bmr * multiplier;
 
     switch (user.goal) {
       case 'Cutting':
@@ -194,6 +201,7 @@ class _NutritionPageState extends State<NutritionPage> {
             ElevatedButton(
               onPressed: () async {
                 final grams = double.tryParse(gramsController.text) ?? 100;
+
                 final success = await nutritionController.addFoodLog(
                   userEmail: userEmail,
                   food: food,
@@ -217,6 +225,133 @@ class _NutritionPageState extends State<NutritionPage> {
           ],
         );
       },
+    );
+  }
+
+  Future<void> _showEditFoodDialog({
+    required BuildContext context,
+    required NutritionLogModel log,
+    required NutritionController nutritionController,
+    required String userEmail,
+  }) async {
+    final gramsController = TextEditingController(
+      text: log.grams.toStringAsFixed(0),
+    );
+    String mealType = log.mealType;
+
+    await showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: Text('Edit ${log.foodName}'),
+          content: StatefulBuilder(
+            builder: (context, setStateDialog) {
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: mealType,
+                      items: _mealTypes
+                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setStateDialog(() => mealType = value);
+                        }
+                      },
+                      decoration: const InputDecoration(
+                        labelText: 'Kategori makan',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: gramsController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Jumlah (gram)',
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final grams = double.tryParse(gramsController.text) ?? log.grams;
+
+                final success = await nutritionController.updateFoodLog(
+                  userEmail: userEmail,
+                  oldLog: log,
+                  grams: grams,
+                  mealType: mealType,
+                );
+
+                if (!context.mounted) return;
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      success ? 'Makanan berhasil diupdate' : 'Gagal update makanan',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Simpan'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteFoodLog({
+    required BuildContext context,
+    required NutritionLogModel log,
+    required NutritionController nutritionController,
+    required String userEmail,
+  }) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text('Hapus makanan'),
+          content: Text('Yakin ingin menghapus ${log.foodName}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm != true) return;
+
+    final success = await nutritionController.deleteFoodLog(
+      id: log.id as int,
+      userEmail: userEmail,
+    );
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success ? 'Makanan berhasil dihapus' : 'Gagal menghapus makanan',
+        ),
+      ),
     );
   }
 
@@ -443,6 +578,24 @@ class _NutritionPageState extends State<NutritionPage> {
               return _MealSection(
                 title: meal,
                 logs: logs,
+                onEdit: (log) {
+                  if (authController.userEmail == null) return;
+                  _showEditFoodDialog(
+                    context: context,
+                    log: log,
+                    nutritionController: nutritionController,
+                    userEmail: authController.userEmail!,
+                  );
+                },
+                onDelete: (log) {
+                  if (authController.userEmail == null) return;
+                  _deleteFoodLog(
+                    context: context,
+                    log: log,
+                    nutritionController: nutritionController,
+                    userEmail: authController.userEmail!,
+                  );
+                },
               );
             }),
           ],
@@ -755,10 +908,14 @@ class _MealSection extends StatelessWidget {
   const _MealSection({
     required this.title,
     required this.logs,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final String title;
-  final List<dynamic> logs;
+  final List<NutritionLogModel> logs;
+  final Function(NutritionLogModel log) onEdit;
+  final Function(NutritionLogModel log) onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -794,33 +951,57 @@ class _MealSection extends StatelessWidget {
                       color: AppColors.softCard,
                       borderRadius: BorderRadius.circular(18),
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Column(
                       children: [
-                        const Icon(Icons.restaurant_menu, color: AppColors.primary),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                log.foodName,
-                                style: const TextStyle(fontWeight: FontWeight.w700),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.restaurant_menu, color: AppColors.primary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    log.foodName,
+                                    style: const TextStyle(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${log.grams.toStringAsFixed(0)} g • '
+                                    '${log.calories.toStringAsFixed(0)} kcal',
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'P ${log.protein.toStringAsFixed(1)} • '
+                                    'C ${log.carbs.toStringAsFixed(1)} • '
+                                    'F ${log.fat.toStringAsFixed(1)}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${log.grams.toStringAsFixed(0)} g • '
-                                '${log.calories.toStringAsFixed(0)} kcal',
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => onEdit(log),
+                                icon: const Icon(Icons.edit_outlined),
+                                label: const Text('Edit'),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'P ${log.protein.toStringAsFixed(1)} • '
-                                'C ${log.carbs.toStringAsFixed(1)} • '
-                                'F ${log.fat.toStringAsFixed(1)}',
-                                style: const TextStyle(fontSize: 12),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => onDelete(log),
+                                icon: const Icon(Icons.delete_outline),
+                                label: const Text('Hapus'),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ],
                     ),

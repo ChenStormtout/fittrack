@@ -78,6 +78,51 @@ class NutritionController extends ChangeNotifier {
     notifyListeners();
   }
 
+
+  Future<bool> deleteFoodLog({
+  required int id,
+  required String userEmail,
+}) async {
+  try {
+    await _nutritionRepository.deleteLog(id);
+    await loadDailyData(userEmail);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+  Future<bool> updateFoodLog({
+    required String userEmail,
+    required NutritionLogModel oldLog,
+    required double grams,
+    required String mealType,
+  }) async {
+    try {
+      final factor = grams / oldLog.grams;
+
+      final updated = NutritionLogModel(
+        id: oldLog.id,
+        userEmail: oldLog.userEmail,
+        foodName: oldLog.foodName,
+        calories: oldLog.calories * factor,
+        protein: oldLog.protein * factor,
+        carbs: oldLog.carbs * factor,
+        fat: oldLog.fat * factor,
+        mealType: mealType,
+        grams: grams,
+        selectedDate: oldLog.selectedDate,
+        createdAt: oldLog.createdAt,
+      );
+
+      await _nutritionRepository.updateLog(updated);
+      await loadDailyData(userEmail);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> addFoodLog({
     required String userEmail,
     required FoodItemModel food,

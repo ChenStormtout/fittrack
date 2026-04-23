@@ -96,7 +96,7 @@ class _ActivityPageState extends State<ActivityPage> {
               child: Column(
                 children: [
                   DropdownButtonFormField<String>(
-                    value: activityController.activityType,
+                    initialValue: activityController.activityType,
                     decoration: const InputDecoration(
                       labelText: 'Tipe Aktivitas Outdoor',
                     ),

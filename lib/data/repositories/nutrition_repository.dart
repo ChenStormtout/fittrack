@@ -29,6 +29,25 @@ class NutritionRepository {
     return result.map(NutritionLogModel.fromMap).toList();
   }
 
+  Future<int> updateLog(NutritionLogModel log) async {
+    final db = await _appDatabase.database;
+    return db.update(
+      TableNames.nutritionLogs,
+      log.toMap(),
+      where: 'id = ?',
+      whereArgs: [log.id],
+    );
+  }
+
+  Future<int> deleteLog(int id) async {
+    final db = await _appDatabase.database;
+    return db.delete(
+      TableNames.nutritionLogs,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   Future<int> insertWaterLog(WaterLogModel log) async {
     final db = await _appDatabase.database;
     return db.insert(TableNames.waterLogs, log.toMap());

@@ -1,7 +1,5 @@
 class FoodItemModel {
   final String name;
-
-  // basis per 100 gram
   final double caloriesPer100g;
   final double proteinPer100g;
   final double carbsPer100g;
@@ -15,16 +13,71 @@ class FoodItemModel {
     required this.fatPer100g,
   });
 
-  factory FoodItemModel.fromOpenFoodFacts(Map<String, dynamic> map) {
-    final nutriments = (map['nutriments'] as Map<String, dynamic>? ?? {});
+  static double _asDouble(dynamic value) {
+    if (value == null) return 0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0;
+  }
+
+  static double _extractNutrientValue(
+    List<dynamic> nutrients, {
+    List<String> nutrientNumbers = const [],
+    List<String> nutrientNames = const [],
+  }) {
+    for (final item in nutrients) {
+      if (item is! Map<String, dynamic>) continue;
+
+      final nutrientNumber = item['nutrientNumber']?.toString().trim() ?? '';
+      final nutrientName =
+          (item['nutrientName'] ?? item['name'] ?? '').toString().toLowerCase().trim();
+
+      if (nutrientNumbers.contains(nutrientNumber)) {
+        return _asDouble(item['value']);
+      }
+
+      for (final name in nutrientNames) {
+        if (nutrientName.contains(name.toLowerCase())) {
+          return _asDouble(item['value']);
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  factory FoodItemModel.fromUsda(Map<String, dynamic> map) {
+    final nutrients = (map['foodNutrients'] as List<dynamic>? ?? []);
+
+    final calories = _extractNutrientValue(
+      nutrients,
+      nutrientNumbers: ['1008'],
+      nutrientNames: ['energy'],
+    );
+
+    final protein = _extractNutrientValue(
+      nutrients,
+      nutrientNumbers: ['1003'],
+      nutrientNames: ['protein'],
+    );
+
+    final carbs = _extractNutrientValue(
+      nutrients,
+      nutrientNumbers: ['1005'],
+      nutrientNames: ['carbohydrate'],
+    );
+
+    final fat = _extractNutrientValue(
+      nutrients,
+      nutrientNumbers: ['1004'],
+      nutrientNames: ['total lipid', 'fat'],
+    );
 
     return FoodItemModel(
-      name: (map['product_name'] ?? map['product_name_en'] ?? 'Unknown Food').toString(),
-      caloriesPer100g: (nutriments['energy-kcal_100g'] as num?)?.toDouble() ??
-          ((nutriments['energy-kcal'] as num?)?.toDouble() ?? 0),
-      proteinPer100g: (nutriments['proteins_100g'] as num?)?.toDouble() ?? 0,
-      carbsPer100g: (nutriments['carbohydrates_100g'] as num?)?.toDouble() ?? 0,
-      fatPer100g: (nutriments['fat_100g'] as num?)?.toDouble() ?? 0,
+      name: (map['description'] ?? 'Unknown Food').toString(),
+      caloriesPer100g: calories,
+      proteinPer100g: protein,
+      carbsPer100g: carbs,
+      fatPer100g: fat,
     );
   }
 

@@ -21,7 +21,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -117,6 +117,7 @@ class AppDatabase {
       CREATE TABLE ${TableNames.gameScores} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_email TEXT NOT NULL,
+        player_name TEXT NOT NULL,
         game_name TEXT NOT NULL,
         score INTEGER NOT NULL,
         created_at TEXT NOT NULL
@@ -214,11 +215,18 @@ class AppDatabase {
         CREATE TABLE ${TableNames.gameScores} (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_email TEXT NOT NULL,
+          player_name TEXT NOT NULL DEFAULT '',
           game_name TEXT NOT NULL,
           score INTEGER NOT NULL,
           created_at TEXT NOT NULL
         )
       ''');
+    }
+
+    if (oldVersion < 7) {
+      await db.execute(
+        'ALTER TABLE ${TableNames.gameScores} ADD COLUMN player_name TEXT NOT NULL DEFAULT ""',
+      );
     }
   }
 }

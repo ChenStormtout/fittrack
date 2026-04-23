@@ -111,7 +111,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _gender,
+                initialValue: _gender,
                 items: const [
                   DropdownMenuItem(value: 'Male', child: Text('Male')),
                   DropdownMenuItem(value: 'Female', child: Text('Female')),
@@ -135,7 +135,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _goal,
+                initialValue: _goal,
                 items: const [
                   DropdownMenuItem(value: 'Cutting', child: Text('Cutting')),
                   DropdownMenuItem(value: 'Bulking', child: Text('Bulking')),
@@ -146,7 +146,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: _activityLevel,
+                initialValue: _activityLevel,
                 items: const [
                   DropdownMenuItem(value: 'Rendah', child: Text('Rendah')),
                   DropdownMenuItem(value: 'Sedang', child: Text('Sedang')),

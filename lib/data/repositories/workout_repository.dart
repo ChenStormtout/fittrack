@@ -49,13 +49,24 @@ class WorkoutRepository {
     return db.insert(TableNames.gameScores, score.toMap());
   }
 
-  Future<List<GameScoreModel>> getGameScores(String userEmail) async {
+  Future<List<GameScoreModel>> getGameScores() async {
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.gameScores,
+      orderBy: 'score DESC, created_at ASC',
+      limit: 20,
+    );
+
+    return result.map(GameScoreModel.fromMap).toList();
+  }
+
+  Future<List<GameScoreModel>> getGameScoresByUser(String userEmail) async {
     final db = await _appDatabase.database;
     final result = await db.query(
       TableNames.gameScores,
       where: 'user_email = ?',
       whereArgs: [userEmail.trim().toLowerCase()],
-      orderBy: 'score DESC',
+      orderBy: 'score DESC, created_at ASC',
     );
 
     return result.map(GameScoreModel.fromMap).toList();
