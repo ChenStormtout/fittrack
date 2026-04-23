@@ -1,3 +1,1 @@
-# project_akhir_mobile
-
-A new Flutter project.
+developer mode jangan lupa 
