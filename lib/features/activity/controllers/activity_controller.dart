@@ -1,11 +1,39 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../data/models/activity_model.dart';
 import '../../../data/repositories/activity_repository.dart';
+
+class ActivityResult {
+  final String activityType;
+  final double distanceKm;
+  final int durationSeconds;
+  final double caloriesBurned;
+  final double elevationGainM;
+  final double avgPaceMinPerKm;
+  final double maxElevationM;
+  final List<LatLng> routeLatLngs;
+  final DateTime startTime;
+  final DateTime endTime;
+
+  const ActivityResult({
+    required this.activityType,
+    required this.distanceKm,
+    required this.durationSeconds,
+    required this.caloriesBurned,
+    required this.elevationGainM,
+    required this.avgPaceMinPerKm,
+    required this.maxElevationM,
+    required this.routeLatLngs,
+    required this.startTime,
+    required this.endTime,
+  });
+}
 
 class ActivityController extends ChangeNotifier {
   ActivityController({
@@ -15,6 +43,7 @@ class ActivityController extends ChangeNotifier {
   final ActivityRepository _activityRepository;
 
   bool _isTracking = false;
+  bool _isPaused = false;
   bool _isLoadingHistory = false;
 
   String _activityType = 'Walking';
@@ -28,17 +57,41 @@ class ActivityController extends ChangeNotifier {
   int _durationSeconds = 0;
   double _distanceKm = 0;
   double _caloriesBurned = 0;
+  double _elevationGainM = 0;
+  double _maxElevationM = 0;
+  double? _lastAltitude;
 
   final List<Map<String, double>> _routePoints = [];
+  final List<LatLng> _routeLatLngs = [];
   List<ActivityModel> _history = [];
+  ActivityResult? _lastResult;
 
   bool get isTracking => _isTracking;
+  bool get isPaused => _isPaused;
   bool get isLoadingHistory => _isLoadingHistory;
   String get activityType => _activityType;
   int get durationSeconds => _durationSeconds;
   double get distanceKm => _distanceKm;
   double get caloriesBurned => _caloriesBurned;
+  double get elevationGainM => _elevationGainM;
+  double get maxElevationM => _maxElevationM;
   List<ActivityModel> get history => _history;
+  List<LatLng> get routeLatLngs => List.unmodifiable(_routeLatLngs);
+  ActivityResult? get lastResult => _lastResult;
+
+  /// Pace dalam menit per km
+  double get paceMinPerKm {
+    if (_distanceKm < 0.01) return 0;
+    return (_durationSeconds / 60.0) / _distanceKm;
+  }
+
+  String get formattedPace {
+    final pace = paceMinPerKm;
+    if (pace <= 0) return '--:--';
+    final min = pace.floor();
+    final sec = ((pace - min) * 60).round();
+    return "${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}";
+  }
 
   void setActivityType(String value) {
     _activityType = value;
@@ -67,13 +120,19 @@ class ActivityController extends ChangeNotifier {
     if (!allowed) return false;
 
     _isTracking = true;
+    _isPaused = false;
     _startTime = DateTime.now();
     _endTime = null;
     _lastPosition = null;
     _durationSeconds = 0;
     _distanceKm = 0;
     _caloriesBurned = 0;
+    _elevationGainM = 0;
+    _maxElevationM = 0;
+    _lastAltitude = null;
     _routePoints.clear();
+    _routeLatLngs.clear();
+    _lastResult = null;
 
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -98,6 +157,7 @@ class ActivityController extends ChangeNotifier {
         'lng': position.longitude,
       };
       _routePoints.add(currentPoint);
+      _routeLatLngs.add(LatLng(position.latitude, position.longitude));
 
       if (_lastPosition != null) {
         final meters = Geolocator.distanceBetween(
@@ -108,6 +168,14 @@ class ActivityController extends ChangeNotifier {
         );
         _distanceKm += meters / 1000.0;
       }
+
+      // Track elevation gain
+      final altitude = position.altitude;
+      if (_lastAltitude != null && altitude > _lastAltitude!) {
+        _elevationGainM += altitude - _lastAltitude!;
+      }
+      _lastAltitude = altitude;
+      _maxElevationM = max(_maxElevationM, altitude);
 
       _lastPosition = position;
       _caloriesBurned = _estimateCalories(
@@ -123,6 +191,74 @@ class ActivityController extends ChangeNotifier {
     return true;
   }
 
+  void pauseTracking() {
+    if (!_isTracking || _isPaused) return;
+    _isPaused = true;
+    _timer?.cancel();
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+    notifyListeners();
+  }
+
+  Future<void> resumeTracking() async {
+    if (!_isTracking || !_isPaused) return;
+    _isPaused = false;
+
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _durationSeconds++;
+      _caloriesBurned = _estimateCalories(
+        activityType: _activityType,
+        durationSeconds: _durationSeconds,
+        distanceKm: _distanceKm,
+      );
+      notifyListeners();
+    });
+
+    _positionSubscription?.cancel();
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
+      ),
+    ).listen((position) {
+      final currentPoint = {
+        'lat': position.latitude,
+        'lng': position.longitude,
+      };
+      _routePoints.add(currentPoint);
+      _routeLatLngs.add(LatLng(position.latitude, position.longitude));
+
+      if (_lastPosition != null) {
+        final meters = Geolocator.distanceBetween(
+          _lastPosition!.latitude,
+          _lastPosition!.longitude,
+          position.latitude,
+          position.longitude,
+        );
+        _distanceKm += meters / 1000.0;
+      }
+
+      final altitude = position.altitude;
+      if (_lastAltitude != null && altitude > _lastAltitude!) {
+        _elevationGainM += altitude - _lastAltitude!;
+      }
+      _lastAltitude = altitude;
+      _maxElevationM = max(_maxElevationM, altitude);
+
+      _lastPosition = position;
+      _caloriesBurned = _estimateCalories(
+        activityType: _activityType,
+        durationSeconds: _durationSeconds,
+        distanceKm: _distanceKm,
+      );
+
+      notifyListeners();
+    });
+
+    notifyListeners();
+  }
+
   Future<bool> stopTracking(String userEmail) async {
     if (!_isTracking || _startTime == null) return false;
 
@@ -132,6 +268,20 @@ class ActivityController extends ChangeNotifier {
     await _positionSubscription?.cancel();
 
     _isTracking = false;
+
+    // Simpan hasil untuk result screen
+    _lastResult = ActivityResult(
+      activityType: _activityType,
+      distanceKm: _distanceKm,
+      durationSeconds: _durationSeconds,
+      caloriesBurned: _caloriesBurned,
+      elevationGainM: _elevationGainM,
+      avgPaceMinPerKm: paceMinPerKm,
+      maxElevationM: _maxElevationM,
+      routeLatLngs: List.from(_routeLatLngs),
+      startTime: _startTime!,
+      endTime: _endTime!,
+    );
 
     final activity = ActivityModel(
       userEmail: userEmail.trim().toLowerCase(),
@@ -150,6 +300,11 @@ class ActivityController extends ChangeNotifier {
 
     notifyListeners();
     return true;
+  }
+
+  void clearLastResult() {
+    _lastResult = null;
+    notifyListeners();
   }
 
   Future<void> loadHistory(String userEmail) async {

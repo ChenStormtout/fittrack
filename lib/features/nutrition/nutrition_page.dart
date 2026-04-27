@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../data/models/food_item_model.dart';
 import '../../data/models/nutrition_log_model.dart';
+import '../../data/remote/food_scanner_service.dart';
 import '../auth/controllers/auth_controller.dart';
 import 'controllers/nutrition_controller.dart';
 
@@ -44,6 +48,123 @@ class _NutritionPageState extends State<NutritionPage> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _scanFoodPhoto(
+    BuildContext context,
+    NutritionController nutritionController,
+    String? userEmail,
+  ) async {
+    // Pilih sumber foto
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const Text(
+              'Foto Makanan',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'AI akan menganalisis kandungan nutrisi makanan dari foto',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: _sourceButton(
+                    icon: Icons.camera_alt_rounded,
+                    label: 'Kamera',
+                    onTap: () => Navigator.pop(context, ImageSource.camera),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _sourceButton(
+                    icon: Icons.photo_library_rounded,
+                    label: 'Galeri',
+                    onTap: () => Navigator.pop(context, ImageSource.gallery),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+    if (!context.mounted) return;
+
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(
+      source: source,
+      imageQuality: 80,
+      maxWidth: 1024,
+    );
+    if (pickedFile == null) return;
+    if (!context.mounted) return;
+
+    final imageFile = File(pickedFile.path);
+
+    // Tampilkan loading + hasil
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => _FoodScanResultSheet(
+        imageFile: imageFile,
+        userEmail: userEmail,
+        nutritionController: nutritionController,
+        mealTypes: _mealTypes,
+      ),
+    );
+  }
+
+  static Widget _sourceButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: AppColors.softCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 32, color: AppColors.primary),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
   }
 
   double _targetCalories(BuildContext context) {
@@ -512,19 +633,62 @@ class _NutritionPageState extends State<NutritionPage> {
               ),
             ),
             const SizedBox(height: 20),
-            TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: 'Cari makanan',
-                hintText: 'Contoh: chicken, bread, milk',
-                suffixIcon: IconButton(
-                  onPressed: () {
-                    nutritionController.searchFoods(_searchController.text);
-                  },
-                  icon: const Icon(Icons.search),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      labelText: 'Cari makanan',
+                      hintText: 'Contoh: chicken, bread, milk',
+                      suffixIcon: IconButton(
+                        onPressed: () {
+                          nutritionController.searchFoods(_searchController.text);
+                        },
+                        icon: const Icon(Icons.search),
+                      ),
+                    ),
+                    onSubmitted: nutritionController.searchFoods,
+                  ),
                 ),
-              ),
-              onSubmitted: nutritionController.searchFoods,
+                const SizedBox(width: 10),
+                // Tombol kamera scan makanan
+                Tooltip(
+                  message: 'Scan foto makanan',
+                  child: InkWell(
+                    onTap: () => _scanFoodPhoto(
+                      context,
+                      nutritionController,
+                      authController.userEmail,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppColors.primary, AppColors.primaryLight],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 14),
             if (nutritionController.isSearching)
@@ -1010,6 +1174,432 @@ class _MealSection extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── FOOD SCAN RESULT BOTTOM SHEET ─────────────────────────────────────────────
+class _FoodScanResultSheet extends StatefulWidget {
+  const _FoodScanResultSheet({
+    required this.imageFile,
+    required this.userEmail,
+    required this.nutritionController,
+    required this.mealTypes,
+  });
+
+  final File imageFile;
+  final String? userEmail;
+  final NutritionController nutritionController;
+  final List<String> mealTypes;
+
+  @override
+  State<_FoodScanResultSheet> createState() => _FoodScanResultSheetState();
+}
+
+class _FoodScanResultSheetState extends State<_FoodScanResultSheet> {
+  List<FoodScanResult>? _results;
+  bool _isAnalyzing = true;
+  String _selectedMeal = 'Sarapan';
+  FoodScanResult? _selectedResult;
+
+  @override
+  void initState() {
+    super.initState();
+    _analyze();
+  }
+
+  Future<void> _analyze() async {
+    final results =
+        await FoodScannerService.instance.analyzeImage(widget.imageFile);
+    if (!mounted) return;
+    setState(() {
+      _results = results;
+      _isAnalyzing = false;
+      _selectedResult = results.isNotEmpty ? results.first : null;
+    });
+  }
+
+  Future<void> _addToLog() async {
+    final result = _selectedResult;
+    if (result == null || widget.userEmail == null) return;
+
+    const grams = 100.0;
+    final success = await widget.nutritionController.addFoodLog(
+      userEmail: widget.userEmail!,
+      food: result.food,
+      mealType: _selectedMeal,
+      grams: grams,
+    );
+
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          success
+              ? '${result.food.name} berhasil ditambahkan ke log!'
+              : 'Gagal menambahkan makanan',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      minChildSize: 0.5,
+      builder: (_, scrollController) {
+        return SingleChildScrollView(
+          controller: scrollController,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.camera_enhance_rounded,
+                        color: AppColors.primary,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Analisis Foto Makanan',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            'Powered by AI',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.file(
+                    widget.imageFile,
+                    width: double.infinity,
+                    height: 200,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_isAnalyzing)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(28),
+                    decoration: BoxDecoration(
+                      color: AppColors.softCard,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Column(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 14),
+                        Text(
+                          'Menganalisis makanan...',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'AI sedang mendeteksi jenis dan menghitung nutrisi',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_results == null || _results!.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppColors.softCard,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(
+                          Icons.no_food_outlined,
+                          size: 36,
+                          color: AppColors.textSecondary,
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          'Makanan tidak terdeteksi',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Coba foto lebih jelas atau gunakan pencarian manual',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  const Text(
+                    'Makanan Terdeteksi',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 10),
+                  ...(_results!.map((r) {
+                    final isSelected = _selectedResult == r;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedResult = r),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AppColors.primary.withOpacity(0.08)
+                              : AppColors.softCard,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color:
+                                isSelected ? AppColors.primary : AppColors.border,
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.primary.withOpacity(0.15)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Icon(
+                                Icons.restaurant_rounded,
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    r.food.name,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: isSelected
+                                          ? AppColors.primary
+                                          : AppColors.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${r.food.caloriesPer100g.toStringAsFixed(0)} kcal/100g • '
+                                    'P ${r.food.proteinPer100g.toStringAsFixed(1)}g',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.softAccent,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                r.confidencePercent,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  })),
+                  if (_selectedResult != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.softCard,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Informasi Nutrisi (per 100g)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              _nutriCell(
+                                'Kalori',
+                                '${_selectedResult!.food.caloriesPer100g.toStringAsFixed(0)}',
+                                'kcal',
+                                const Color(0xFFE91E63),
+                              ),
+                              _nutriCell(
+                                'Protein',
+                                '${_selectedResult!.food.proteinPer100g.toStringAsFixed(1)}',
+                                'g',
+                                const Color(0xFF2196F3),
+                              ),
+                              _nutriCell(
+                                'Karbo',
+                                '${_selectedResult!.food.carbsPer100g.toStringAsFixed(1)}',
+                                'g',
+                                const Color(0xFFFF9800),
+                              ),
+                              _nutriCell(
+                                'Lemak',
+                                '${_selectedResult!.food.fatPer100g.toStringAsFixed(1)}',
+                                'g',
+                                const Color(0xFF4CAF50),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: _selectedMeal,
+                      decoration: const InputDecoration(
+                        labelText: 'Tambah ke kategori',
+                      ),
+                      items: widget.mealTypes
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setState(() => _selectedMeal = v);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        onPressed:
+                            widget.userEmail == null ? null : _addToLog,
+                        style: ElevatedButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        icon: const Icon(Icons.add_circle_rounded),
+                        label: Text(
+                          'Tambah ${_selectedResult!.food.name} ke Log',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _nutriCell(
+      String label, String value, String unit, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            '$value $unit',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -100,7 +100,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           controller: _passwordController,
                           label: 'Password',
                           hint: 'Minimal 6 karakter',
-                          obscureText: true,
+                          isPassword: true,
                           prefixIcon: Icons.lock_outline,
                           validator: Validators.password,
                         ),
@@ -109,7 +109,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           controller: _confirmPasswordController,
                           label: 'Konfirmasi Password',
                           hint: 'Ulangi password',
-                          obscureText: true,
+                          isPassword: true,
                           prefixIcon: Icons.lock_reset_outlined,
                           validator: (value) => Validators.confirmPassword(
                             value,

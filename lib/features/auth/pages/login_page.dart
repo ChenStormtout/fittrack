@@ -104,7 +104,7 @@ class _LoginPageState extends State<LoginPage> {
                           controller: _passwordController,
                           label: 'Password',
                           hint: 'Masukkan password',
-                          obscureText: true,
+                          isPassword: true,
                           prefixIcon: Icons.lock_outline,
                           validator: Validators.password,
                         ),
