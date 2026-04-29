@@ -1,0 +1,17 @@
+[33m3a368e4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m HEAD@{0}: filter-branch: rewrite
+[33m5d7ad3c[m HEAD@{1}: commit: fitur ai di nutrition
+[33m1fa9c2e[m HEAD@{2}: commit: fitur ai di nutrition
+[33m7c596fa[m HEAD@{3}: commit: fitur ai di nutrition
+[33m8468ef5[m HEAD@{4}: commit: shop v2
+[33m81be038[m HEAD@{5}: commit: menu shop
+[33m9da13ae[m HEAD@{6}: reset: moving to 9da13ae
+[33m6f79b4e[m HEAD@{7}: reset: moving to 6f79b4e
+[33maf7d73d[m HEAD@{8}: commit: resolve merge conflict
+[33m9da13ae[m HEAD@{9}: pull origin main: Fast-forward
+[33m9bcbd47[m HEAD@{10}: reset: moving to HEAD
+[33m9bcbd47[m HEAD@{11}: pull origin main: Merge made by the 'ort' strategy.
+[33m6f79b4e[m HEAD@{12}: commit: update menu game dan nutrisi
+[33m0c355c4[m HEAD@{13}: commit: update project
+[33m1a568e8[m HEAD@{14}: Branch: renamed refs/heads/main to refs/heads/main
+[33m1a568e8[m HEAD@{16}: Branch: renamed refs/heads/master to refs/heads/main
+[33m1a568e8[m HEAD@{18}: commit (initial): first commit
