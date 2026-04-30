@@ -1,6 +1,29 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart' show placemarkFromCoordinates, Placemark;
+import 'package:http/http.dart' as http;
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
+
+// pubspec.yaml — pastikan ada:
+//   dependencies:
+//     geolocator: ^11.0.0
+//     geocoding: ^3.0.0
+//     http: ^1.2.0
+//     flutter_map: ^6.1.0
+//     latlong2: ^0.9.0
+//
+// Android → AndroidManifest.xml (dalam <manifest>):
+//   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+//   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+//   <uses-permission android:name="android.permission.INTERNET"/>
+//
+// iOS → Info.plist:
+//   <key>NSLocationWhenInUseUsageDescription</key>
+//   <string>Digunakan untuk mengisi alamat pengiriman otomatis.</string>
 
 // ============================================================
 // APP COLORS — sesuai tema aplikasi
@@ -223,6 +246,9 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   final _searchCtrl = TextEditingController();
   final _currency   = CurrencyService();
 
+  // Overlay notifikasi popup
+  OverlayEntry? _overlayEntry;
+
   late final AnimationController _cartAnim;
   late final Animation<double>   _cartScale;
 
@@ -250,7 +276,12 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   }
 
   @override
-  void dispose() { _cartAnim.dispose(); _searchCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _overlayEntry?.remove();
+    _cartAnim.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   // ── Cart ───────────────────────────────────────────────────
   int    get _totalItems => _cart.fold(0,    (s, i) => s + i.quantity);
@@ -258,19 +289,30 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
 
   void _add(ProductModel p) {
     HapticFeedback.lightImpact();
+    final isNew = _cart.indexWhere((x) => x.product.id == p.id) < 0;
     setState(() {
       final i = _cart.indexWhere((x) => x.product.id == p.id);
       if (i >= 0) _cart[i].quantity++; else _cart.add(CartItem(product: p));
     });
     _cartAnim.forward(from: 0);
+    _showCartToast(p, isNew);
   }
 
   void _remove(ProductModel p) {
     HapticFeedback.lightImpact();
+    bool removed = false;
     setState(() {
       final i = _cart.indexWhere((x) => x.product.id == p.id);
-      if (i >= 0) { if (_cart[i].quantity > 1) _cart[i].quantity--; else _cart.removeAt(i); }
+      if (i >= 0) {
+        if (_cart[i].quantity > 1) {
+          _cart[i].quantity--;
+        } else {
+          _cart.removeAt(i);
+          removed = true;
+        }
+      }
     });
+    if (removed) _showToast('${p.name} dihapus dari keranjang', AppColors.textSecondary, Icons.remove_shopping_cart_outlined);
   }
 
   int _qty(int id) {
@@ -759,22 +801,146 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
     builder: (_) => _CheckoutSheet(
       totalPrice: _totalPrice, totalItems: _totalItems,
       currency: _currency, selCur: _selCur,
-      onConfirm: () {
+      onConfirm: (PaymentMethod method) {
         setState(() { _cart.clear(); _showCart = false; });
-        _snack('Pesanan berhasil dibuat! 🎉', AppColors.primary);
+        // Tampilkan notifikasi sukses yang berbeda sesuai metode
+        Future.delayed(const Duration(milliseconds: 300), () {
+          _showToast(
+            '  Pesanan berhasil dibuat!\nPembayaran via ${method.label}',
+            AppColors.primary,
+            Icons.check_circle_rounded,
+          );
+        });
       },
     ),
   );
 
+  // ── Popup overlay notifikasi (lebih keren dari SnackBar) ──
+  void _showCartToast(ProductModel p, bool isNew) {
+    final qty = _qty(p.id);
+    _showToast(
+      isNew
+          ? '${p.emoji}  ${p.name}\nDitambahkan ke keranjang'
+          : '${p.emoji}  ${p.name}\nJumlah diperbarui → $qty item',
+      AppColors.primary,
+      isNew ? Icons.shopping_bag_rounded : Icons.update_rounded,
+    );
+  }
+
+  void _showToast(String msg, Color color, IconData icon) {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+
+    final lines = msg.split('\n');
+    final entry = OverlayEntry(builder: (_) => _ToastWidget(
+      title: lines.first,
+      subtitle: lines.length > 1 ? lines.last : null,
+      color: color,
+      icon: icon,
+      onDismiss: () { _overlayEntry?.remove(); _overlayEntry = null; },
+    ));
+    _overlayEntry = entry;
+    Overlay.of(context).insert(entry);
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (_overlayEntry == entry) { _overlayEntry?.remove(); _overlayEntry = null; }
+    });
+  }
+
   void _snack(String msg, Color color) {
+    // Tetap ada sebagai fallback untuk pesan sederhana
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
-        content: Text(msg, style: const TextStyle(fontSize:13)),
+        content: Text(msg, style: const TextStyle(fontSize: 13)),
         backgroundColor: color, behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(12), duration: const Duration(seconds:3),
+        margin: const EdgeInsets.all(12), duration: const Duration(seconds: 3),
       ));
+  }
+}
+
+// ============================================================
+// TOAST POPUP WIDGET — notifikasi overlay animasi
+// ============================================================
+class _ToastWidget extends StatefulWidget {
+  final String title;
+  final String? subtitle;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onDismiss;
+
+  const _ToastWidget({
+    required this.title, this.subtitle,
+    required this.color, required this.icon, required this.onDismiss,
+  });
+
+  @override
+  State<_ToastWidget> createState() => _ToastWidgetState();
+}
+
+class _ToastWidgetState extends State<_ToastWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<Offset>   _slide;
+  late Animation<double>   _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 380));
+    _slide = Tween<Offset>(begin: const Offset(0, -1.5), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack));
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 12,
+      left: 16, right: 16,
+      child: SlideTransition(position: _slide,
+        child: FadeTransition(opacity: _fade,
+          child: Material(color: Colors.transparent,
+            child: GestureDetector(onTap: widget.onDismiss,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: widget.color.withOpacity(0.25), width: 1),
+                  boxShadow: [
+                    BoxShadow(color: widget.color.withOpacity(0.18), blurRadius: 20, offset: const Offset(0, 6)),
+                    BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 2)),
+                  ],
+                ),
+                child: Row(children: [
+                  Container(width: 40, height: 40,
+                    decoration: BoxDecoration(color: widget.color.withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+                    child: Icon(widget.icon, color: widget.color, size: 20)),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(widget.title,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    if (widget.subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(widget.subtitle!,
+                          style: TextStyle(fontSize: 11, color: widget.color, fontWeight: FontWeight.w600)),
+                    ],
+                  ])),
+                  const SizedBox(width: 8),
+                  Icon(Icons.close, size: 14, color: AppColors.textSecondary.withOpacity(0.5)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -870,7 +1036,7 @@ class _CheckoutSheet extends StatefulWidget {
   final int totalItems;
   final CurrencyService currency;
   final String selCur;
-  final VoidCallback onConfirm;
+  final void Function(PaymentMethod method) onConfirm;
 
   const _CheckoutSheet({required this.totalPrice, required this.totalItems,
       required this.currency, required this.selCur, required this.onConfirm});
@@ -881,24 +1047,19 @@ class _CheckoutSheet extends StatefulWidget {
 
 class _CheckoutSheetState extends State<_CheckoutSheet> {
   PaymentMethod? _method;
-  int  _step        = 0;   // 0=Alamat  1=Pembayaran  2=Konfirmasi
-  bool _gpsLoading  = false;
-  bool _gpsDetected = false;
+  int  _step       = 0; // 0=Alamat  1=Pembayaran  2=Konfirmasi
+  bool _gpsLoading = false;
 
   final _nameCtrl    = TextEditingController();
   final _phoneCtrl   = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _noteCtrl    = TextEditingController();
 
-  // Lokasi simulasi GPS/LBS berdasarkan koordinat Yogyakarta sekitarnya
-  static const _dummyLocs = [
-    'Jl. Malioboro No. 12, Gedongtengen, Yogyakarta 55271',
-    'Jl. Solo KM 5, Maguwoharjo, Sleman, DIY 55282',
-    'Jl. Parangtritis No. 88, Bantul, DIY 55188',
-    'Jl. Kaliurang KM 8, Ngaglik, Sleman, DIY 55581',
-    'Jl. Colombo No. 1, Gondokusuman, Yogyakarta 55222',
-    'Jl. Tentara Pelajar No. 7, Wirobrajan, Yogyakarta 55253',
-  ];
+  // Koordinat pin di peta
+  ll.LatLng _pinLatLng = const ll.LatLng(-7.7956, 110.3695); // default Yogyakarta
+  bool _mapReady   = false;
+  bool _geocoding  = false; // loading reverse geocoding saat pin digeser
+  final MapController _mapCtrl = MapController();
 
   @override
   void dispose() {
@@ -907,12 +1068,121 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     super.dispose();
   }
 
-  Future<void> _detectGPS() async {
-    setState(() { _gpsLoading = true; _gpsDetected = false; });
-    await Future.delayed(const Duration(milliseconds: 2200)); // simulasi GPS
-    final loc = _dummyLocs[DateTime.now().second % _dummyLocs.length];
-    setState(() { _gpsLoading = false; _gpsDetected = true; _addressCtrl.text = loc; });
+  // ── Minta GPS real lalu pindahkan peta ke sana ────────────
+  Future<void> _goToMyLocation() async {
+    setState(() => _gpsLoading = true);
+    try {
+      final svcOn = await Geolocator.isLocationServiceEnabled();
+      if (!svcOn) throw Exception('GPS tidak aktif. Nyalakan di Pengaturan.');
+
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+        if (perm == LocationPermission.denied) throw Exception('Izin lokasi ditolak.');
+      }
+      if (perm == LocationPermission.deniedForever) {
+        throw Exception('Izin diblokir permanen. Buka Pengaturan → Izin Lokasi.');
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
+      );
+
+      final newLatLng = ll.LatLng(pos.latitude, pos.longitude);
+      _mapCtrl.move(newLatLng, 17.0); // zoom 17 = level jalan
+      setState(() { _pinLatLng = newLatLng; });
+      await _reverseGeocode(newLatLng);
+    } catch (e) {
+      if (mounted) _showErr(e.toString().replaceAll('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _gpsLoading = false);
+    }
   }
+
+  // ── Reverse geocode koordinat → isi field alamat ──────────
+  Future<void> _reverseGeocode(ll.LatLng latLng) async {
+    setState(() => _geocoding = true);
+    try {
+      // Coba via Nominatim (lebih akurat + gratis)
+      final addr = await _nominatimReverse(latLng.latitude, latLng.longitude);
+      if (mounted) setState(() => _addressCtrl.text = addr);
+    } catch (_) {
+      // Fallback: geocoding package
+      try {
+        final marks = await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
+        if (marks.isNotEmpty) {
+          final pm = marks.first;
+          final seen = <String>{};
+          final parts = <String>[];
+          void add(String? v) {
+            if (v == null || v.trim().isEmpty) return;
+            if (seen.add(v.trim().toLowerCase())) parts.add(v.trim());
+          }
+          add(pm.street); add(pm.subLocality); add(pm.locality);
+          add(pm.subAdministrativeArea); add(pm.administrativeArea); add(pm.postalCode);
+          if (mounted) setState(() => _addressCtrl.text = parts.join(', '));
+        }
+      } catch (_) {
+        // Fallback terakhir: koordinat mentah
+        if (mounted) {
+          setState(() => _addressCtrl.text =
+              'Lat: ${latLng.latitude.toStringAsFixed(6)}, '
+              'Lng: ${latLng.longitude.toStringAsFixed(6)}');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _geocoding = false);
+    }
+  }
+
+  // ── Nominatim OpenStreetMap reverse geocoding ─────────────
+  Future<String> _nominatimReverse(double lat, double lng) async {
+    final uri = Uri.parse(
+      'https://nominatim.openstreetmap.org/reverse'
+      '?format=json&lat=$lat&lon=$lng&addressdetails=1&accept-language=id',
+    );
+    final resp = await http.get(uri, headers: {'User-Agent': 'FitLifeApp/1.0'})
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    final addr = data['address'] as Map<String, dynamic>?;
+    if (addr == null) {
+      final disp = data['display_name'] as String?;
+      if (disp != null && disp.isNotEmpty) return disp;
+      throw Exception('Alamat tidak ditemukan');
+    }
+
+    final seen  = <String>{};
+    final parts = <String>[];
+    void add(String? v) {
+      if (v == null || v.trim().isEmpty) return;
+      if (seen.add(v.trim().toLowerCase())) parts.add(v.trim());
+    }
+    add(addr['road'] as String?);
+    add(addr['neighbourhood'] as String?);
+    add(addr['suburb'] as String?);
+    add(addr['village'] as String?);
+    add((addr['town'] ?? addr['city']) as String?);
+    add(addr['county'] as String?);
+    add(addr['state'] as String?);
+    add(addr['postcode'] as String?);
+
+    if (parts.isEmpty) {
+      final disp = data['display_name'] as String?;
+      if (disp != null && disp.isNotEmpty) return disp;
+      throw Exception('Komponen alamat kosong');
+    }
+    return parts.join(', ');
+  }
+
+  void _showErr(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(msg, style: const TextStyle(fontSize: 12)),
+    backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    margin: const EdgeInsets.all(12), duration: const Duration(seconds: 4),
+  ));
 
   bool get _addrOk =>
       _nameCtrl.text.trim().isNotEmpty &&
@@ -964,52 +1234,121 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     );
   }
 
-  // ── STEP 0: ALAMAT ─────────────────────────────────────────
+  // ── STEP 0: ALAMAT + MAP PICKER ─────────────────────────────
   Widget _addrStep() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     const Text('Alamat Pengiriman', style: TextStyle(fontSize:16, fontWeight:FontWeight.w800, color:AppColors.textPrimary)),
-    const SizedBox(height:16),
+    const SizedBox(height:14),
     _tf('Nama Penerima', _nameCtrl, Icons.person_outline, 'Nama lengkap penerima'),
-    const SizedBox(height:12),
+    const SizedBox(height:10),
     _tf('Nomor HP', _phoneCtrl, Icons.phone_outlined, '08xxxxxxxxxx', type: TextInputType.phone),
-    const SizedBox(height:12),
-    // GPS Button
+    const SizedBox(height:14),
+
+    // ── MAP PICKER (ala Grab) ────────────────────────────────
     Container(
-      width: double.infinity,
+      height: 240,
       decoration: BoxDecoration(
-        color: AppColors.softAccent,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.3))),
-      child: Material(color: Colors.transparent,
-        child: InkWell(borderRadius: BorderRadius.circular(12),
-          onTap: _gpsLoading ? null : _detectGPS,
-          child: Padding(padding: const EdgeInsets.symmetric(horizontal:16, vertical:13),
-            child: Row(children: [
-              _gpsLoading
-                  ? const SizedBox(width:20, height:20, child: CircularProgressIndicator(strokeWidth:2, color:AppColors.primary))
-                  : Icon(_gpsDetected ? Icons.location_on : Icons.my_location_rounded, color:AppColors.primary, size:20),
-              const SizedBox(width:12),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_gpsLoading ? 'Mendeteksi lokasi GPS...'
-                    : _gpsDetected ? 'Lokasi berhasil dideteksi ✓'
-                    : 'Deteksi lokasi otomatis (GPS/LBS)',
-                    style: const TextStyle(fontSize:13, fontWeight:FontWeight.w700, color:AppColors.primary)),
-                Text(_gpsLoading ? 'Harap tunggu sebentar...'
-                    : 'Isi alamat otomatis dari GPS / lokasi jaringan',
-                    style: const TextStyle(fontSize:10, color:AppColors.textSecondary)),
-              ])),
-              if (!_gpsLoading) const Icon(Icons.chevron_right, color:AppColors.primary, size:18),
-            ])))),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0,3))],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(children: [
+
+          // ── Tile map OpenStreetMap ───────────────────────
+          FlutterMap(
+            mapController: _mapCtrl,
+            options: MapOptions(
+              initialCenter: _pinLatLng,
+              initialZoom: 15.0,
+              onMapReady: () => setState(() => _mapReady = true),
+              // Saat pengguna selesai menggeser peta → update pin & reverse geocode
+              onPositionChanged: (pos, hasGesture) {
+                if (hasGesture && pos.center != null) {
+                  setState(() => _pinLatLng = pos.center!);
+                }
+              },
+              onMapEvent: (event) {
+                // Reverse geocode hanya saat gesture selesai (drag end)
+                if (event is MapEventMoveEnd) {
+                  _reverseGeocode(_pinLatLng);
+                }
+              },
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.fitlife.app',
+              ),
+            ],
+          ),
+
+          // ── Pin tengah (tidak bergerak, peta yang bergerak) ─
+          const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.location_on, color: AppColors.primary, size: 42,
+                    shadows: [Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0,2))]),
+                // Bayangan pin kecil di bawah
+                SizedBox(height: 0),
+              ],
+            ),
+          ),
+
+          // ── Loading reverse geocoding overlay ────────────
+          if (_geocoding)
+            Positioned(bottom: 0, left: 0, right: 0,
+              child: Container(
+                color: Colors.black45,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  SizedBox(width:14, height:14, child: CircularProgressIndicator(strokeWidth:2, color:Colors.white)),
+                  SizedBox(width:8),
+                  Text('Mencari alamat...', style: TextStyle(color:Colors.white, fontSize:12)),
+                ]),
+              )),
+
+          // ── Tombol lokasi saya (pojok kanan bawah) ───────
+          Positioned(right: 12, bottom: 12,
+            child: FloatingActionButton.small(
+              heroTag: 'gps_fab',
+              backgroundColor: Colors.white,
+              elevation: 4,
+              onPressed: _gpsLoading ? null : _goToMyLocation,
+              child: _gpsLoading
+                  ? const SizedBox(width:18, height:18,
+                      child: CircularProgressIndicator(strokeWidth:2, color:AppColors.primary))
+                  : const Icon(Icons.my_location_rounded, color: AppColors.primary, size: 20),
+            )),
+
+          // ── Label instruksi (pojok atas) ─────────────────
+          Positioned(top: 10, left: 0, right: 0,
+            child: Center(child: Container(
+              padding: const EdgeInsets.symmetric(horizontal:12, vertical:6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.92),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius:6)],
+              ),
+              child: const Text('Geser peta untuk pindahkan pin',
+                  style: TextStyle(fontSize:11, fontWeight:FontWeight.w600, color:AppColors.textPrimary)),
+            ))),
+        ]),
+      ),
     ),
-    const SizedBox(height:12),
-    // Alamat field
-    TextField(controller: _addressCtrl, maxLines:3,
+
+    const SizedBox(height:10),
+
+    // ── Alamat hasil reverse geocode (editable) ──────────────
+    TextField(controller: _addressCtrl, maxLines: 3,
       style: const TextStyle(fontSize:13, color:AppColors.textPrimary),
       onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
-        labelText: 'Alamat Lengkap',
-        hintText: 'Jl. Nama Jalan No. xx, Kelurahan, Kecamatan...',
+        labelText: 'Alamat Terdeteksi',
+        hintText: 'Geser pin di peta atau ketik manual...',
         hintStyle: const TextStyle(fontSize:12, color:AppColors.textSecondary),
-        labelStyle: const TextStyle(fontSize:13, color:AppColors.textSecondary),
+        labelStyle: const TextStyle(fontSize:12, color:AppColors.textSecondary),
         prefixIcon: const Icon(Icons.home_outlined, color:AppColors.primary, size:20),
         filled: true, fillColor: AppColors.softCard,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
@@ -1018,7 +1357,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color:AppColors.primary, width:1.2)),
       )),
-    const SizedBox(height:12),
+    const SizedBox(height:10),
     _tf('Catatan untuk kurir (opsional)', _noteCtrl, Icons.note_outlined, 'Contoh: titipkan ke satpam'),
   ]);
 
@@ -1170,7 +1509,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     } else {
       label   = 'Konfirmasi & Pesan Sekarang';
       enabled = true;
-      onTap   = () { Navigator.pop(context); widget.onConfirm(); };
+      onTap   = () { Navigator.pop(context); widget.onConfirm(_method!); };
     }
 
     return Container(
