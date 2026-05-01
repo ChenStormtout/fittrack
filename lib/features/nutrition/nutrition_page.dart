@@ -9,7 +9,6 @@ import 'package:provider/provider.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../core/constants/app_colors.dart';
-import '../../core/services/ai_nutrition_service.dart';
 import '../../core/services/notification_service.dart';
 import '../../data/models/food_item_model.dart';
 import '../../data/models/nutrition_log_model.dart';
@@ -27,12 +26,6 @@ class NutritionPage extends StatefulWidget {
 class _NutritionPageState extends State<NutritionPage> {
   final _searchController = TextEditingController();
   bool _loaded = false;
-
-  // ── AI CHAT STATE ─────────────────────────────────────────────────
-  final TextEditingController _aiChatController = TextEditingController();
-  final List<Map<String, dynamic>> _aiMessages = [];
-  bool _isAiTyping = false;
-  bool _showAiChat = false;
 
   // ── SENSOR STATE ─────────────────────────────────────────────────
   bool _shakeEnabled = true;
@@ -87,10 +80,7 @@ class _NutritionPageState extends State<NutritionPage> {
 
     if (userEmail == null) return;
 
-    final success = await nutritionController.addWater(
-      userEmail: userEmail,
-      amountMl: 250,
-    );
+    await nutritionController.addWater(userEmail: userEmail, amountMl: 250);
 
     if (!mounted) return;
 
@@ -119,106 +109,7 @@ class _NutritionPageState extends State<NutritionPage> {
   @override
   void dispose() {
     _searchController.dispose();
-    _aiChatController.dispose();
     super.dispose();
-  }
-
-  // ── AI CHAT METHODS ──────────────────────────────────────────────
-  Future<void> _sendAiMessage() async {
-    final text = _aiChatController.text.trim();
-    if (text.isEmpty) return;
-
-    final user = context.read<AuthController>().currentUser;
-    final nutritionController = context.read<NutritionController>();
-
-    setState(() {
-      _aiMessages.add({'role': 'user', 'text': text});
-      _isAiTyping = true;
-      _aiChatController.clear();
-    });
-
-    final contextData = {
-      'totalCalories': nutritionController.totalCalories,
-      'targetCalories': _targetCalories(context),
-      'totalProtein': nutritionController.totalProtein,
-      'totalCarbs': nutritionController.totalCarbs,
-      'totalFat': nutritionController.totalFat,
-      'totalWater': nutritionController.totalWaterMl,
-      'targetWater': _targetWater(context),
-      'goal': user?.goal ?? 'Maintain',
-      'mealLog': nutritionController.dailyLogs.map((l) => {
-        'name': l.foodName,
-        'calories': l.calories,
-        'mealType': l.mealType,
-      }).toList(),
-    };
-
-    try {
-      final response = await AiNutritionService.instance.askCoach(
-        userMessage: text,
-        nutritionContext: contextData,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _aiMessages.add({'role': 'assistant', 'text': response});
-        _isAiTyping = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _aiMessages.add({
-          'role': 'assistant',
-          'text': 'Maaf, terjadi kesalahan. Silakan coba lagi.',
-        });
-        _isAiTyping = false;
-      });
-    }
-  }
-
-  Future<void> _askAiForRecommendation() async {
-    final user = context.read<AuthController>().currentUser;
-    final nutritionController = context.read<NutritionController>();
-
-    final contextData = {
-      'totalCalories': nutritionController.totalCalories,
-      'targetCalories': _targetCalories(context),
-      'remainingCalories': _targetCalories(context) - nutritionController.totalCalories,
-      'goal': user?.goal ?? 'Maintain',
-      'preferredMeal': _mealTypes,
-    };
-
-    setState(() {
-      _showAiChat = true;
-      _aiMessages.add({
-        'role': 'user',
-        'text': '🤖 Berikan rekomendasi makanan untuk sisa hari ini',
-      });
-      _isAiTyping = true;
-    });
-
-    try {
-      final response = await AiNutritionService.instance.getMealRecommendation(
-        context: contextData,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _aiMessages.add({'role': 'assistant', 'text': response});
-        _isAiTyping = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _aiMessages.add({
-          'role': 'assistant',
-          'text': 'Maaf, gagal mendapatkan rekomendasi.',
-        });
-        _isAiTyping = false;
-      });
-    }
   }
 
   // ── FOOD SCAN ────────────────────────────────────────────────────
@@ -440,7 +331,9 @@ class _NutritionPageState extends State<NutritionPage> {
                     DropdownButtonFormField<String>(
                       value: mealType,
                       items: _mealTypes
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
                           .toList(),
                       onChanged: (value) {
                         if (value != null) {
@@ -475,10 +368,22 @@ class _NutritionPageState extends State<NutritionPage> {
                       }).toList(),
                     ),
                     const SizedBox(height: 16),
-                    _dialogInfo('Kalori', '${food.caloriesFor(grams).toStringAsFixed(0)} kcal'),
-                    _dialogInfo('Protein', '${food.proteinFor(grams).toStringAsFixed(1)} g'),
-                    _dialogInfo('Karbo', '${food.carbsFor(grams).toStringAsFixed(1)} g'),
-                    _dialogInfo('Lemak', '${food.fatFor(grams).toStringAsFixed(1)} g'),
+                    _dialogInfo(
+                      'Kalori',
+                      '${food.caloriesFor(grams).toStringAsFixed(0)} kcal',
+                    ),
+                    _dialogInfo(
+                      'Protein',
+                      '${food.proteinFor(grams).toStringAsFixed(1)} g',
+                    ),
+                    _dialogInfo(
+                      'Karbo',
+                      '${food.carbsFor(grams).toStringAsFixed(1)} g',
+                    ),
+                    _dialogInfo(
+                      'Lemak',
+                      '${food.fatFor(grams).toStringAsFixed(1)} g',
+                    ),
                   ],
                 ),
               );
@@ -506,7 +411,9 @@ class _NutritionPageState extends State<NutritionPage> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      success ? 'Makanan ditambahkan' : 'Gagal menambahkan makanan',
+                      success
+                          ? 'Makanan ditambahkan'
+                          : 'Gagal menambahkan makanan',
                     ),
                   ),
                 );
@@ -544,7 +451,9 @@ class _NutritionPageState extends State<NutritionPage> {
                     DropdownButtonFormField<String>(
                       value: mealType,
                       items: _mealTypes
-                          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                          .map(
+                            (e) => DropdownMenuItem(value: e, child: Text(e)),
+                          )
                           .toList(),
                       onChanged: (value) {
                         if (value != null) {
@@ -575,7 +484,8 @@ class _NutritionPageState extends State<NutritionPage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                final grams = double.tryParse(gramsController.text) ?? log.grams;
+                final grams =
+                    double.tryParse(gramsController.text) ?? log.grams;
 
                 final success = await nutritionController.updateFoodLog(
                   userEmail: userEmail,
@@ -590,7 +500,9 @@ class _NutritionPageState extends State<NutritionPage> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                      success ? 'Makanan berhasil diupdate' : 'Gagal update makanan',
+                      success
+                          ? 'Makanan berhasil diupdate'
+                          : 'Gagal update makanan',
                     ),
                   ),
                 );
@@ -675,11 +587,18 @@ class _NutritionPageState extends State<NutritionPage> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.vibration, size: 16, color: AppColors.textSecondary),
+                      const Icon(
+                        Icons.vibration,
+                        size: 16,
+                        color: AppColors.textSecondary,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Shake: ${_shakeEnabled ? "ON" : "OFF"}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                       Switch(
                         value: _shakeEnabled,
@@ -708,7 +627,9 @@ class _NutritionPageState extends State<NutritionPage> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
-                            success ? 'Air minum ditambahkan' : 'Gagal menambahkan air',
+                            success
+                                ? 'Air minum ditambahkan'
+                                : 'Gagal menambahkan air',
                           ),
                         ),
                       );
@@ -743,7 +664,9 @@ class _NutritionPageState extends State<NutritionPage> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
-                        success ? 'Air minum ditambahkan' : 'Gagal menambahkan air',
+                        success
+                            ? 'Air minum ditambahkan'
+                            : 'Gagal menambahkan air',
                       ),
                     ),
                   );
@@ -767,229 +690,205 @@ class _NutritionPageState extends State<NutritionPage> {
     final targetProtein = _targetProtein(context);
     final targetWater = _targetWater(context);
 
-    final waterProgress =
-        (nutritionController.totalWaterMl / targetWater).clamp(0.0, 1.0);
-    final calorieProgress =
-        (nutritionController.totalCalories / targetCalories).clamp(0.0, 1.0);
+    final waterProgress = (nutritionController.totalWaterMl / targetWater)
+        .clamp(0.0, 1.0);
+    final calorieProgress = (nutritionController.totalCalories / targetCalories)
+        .clamp(0.0, 1.0);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Nutrisi Harian'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.smart_toy_rounded),
-            tooltip: 'AI Nutrition Coach',
-            onPressed: () {
-              setState(() => _showAiChat = !_showAiChat);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_rounded),
-            tooltip: 'Rekomendasi AI',
-            onPressed: _askAiForRecommendation,
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: () async {
-              if (authController.userEmail != null) {
-                await nutritionController.loadDailyData(authController.userEmail!);
-              }
-            },
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              children: [
-                _HeaderDateCard(
-                  dateText: DateFormat('EEEE, dd MMM yyyy').format(nutritionController.selectedDate),
-                  goal: user?.goal ?? 'Maintain',
-                  onTapDate: () => _pickDate(
-                    context,
-                    nutritionController,
-                    authController.userEmail,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _OverviewCard(
-                  totalCalories: nutritionController.totalCalories,
-                  targetCalories: targetCalories,
-                  totalProtein: nutritionController.totalProtein,
-                  totalCarbs: nutritionController.totalCarbs,
-                  totalFat: nutritionController.totalFat,
-                  calorieProgress: calorieProgress,
-                ),
-                const SizedBox(height: 16),
-                _WaterCard(
-                  totalWaterMl: nutritionController.totalWaterMl,
-                  targetWaterMl: targetWater,
-                  progress: waterProgress,
-                  onAdd: authController.userEmail == null
-                      ? null
-                      : () => _showAddWaterDialog(
-                            context: context,
-                            nutritionController: nutritionController,
-                            userEmail: authController.userEmail!,
-                          ),
-                  shakeEnabled: _shakeEnabled,
-                  onToggleShake: (v) => setState(() => _shakeEnabled = v),
-                ),
-                const SizedBox(height: 16),
-                _InsightCard(
-                  text: nutritionController.buildDailySummary(
-                    targetCalories: targetCalories,
-                    targetProtein: targetProtein,
-                    targetWaterMl: targetWater,
-                    goal: user?.goal ?? 'Maintain',
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          labelText: 'Cari makanan',
-                          hintText: 'Contoh: chicken, bread, milk',
-                          suffixIcon: IconButton(
-                            onPressed: () {
-                              nutritionController.searchFoods(_searchController.text);
-                            },
-                            icon: const Icon(Icons.search),
-                          ),
-                        ),
-                        onSubmitted: nutritionController.searchFoods,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Tooltip(
-                      message: 'Scan foto makanan',
-                      child: InkWell(
-                        onTap: () => _scanFoodPhoto(
-                          context,
-                          nutritionController,
-                          authController.userEmail,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [AppColors.primary, AppColors.primaryLight],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primary.withOpacity(0.3),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.camera_alt_rounded,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (nutritionController.isSearching)
-                  const Center(child: CircularProgressIndicator())
-                else if (_searchController.text.isNotEmpty &&
-                    nutritionController.searchResults.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Text(
-                      'Makanan tidak ditemukan atau API tidak memberi hasil.',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                else
-                  ...nutritionController.searchResults.take(8).map((food) {
-                    return Card(
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        title: Text(
-                          food.name,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(
-                          'per 100g • ${food.caloriesPer100g.toStringAsFixed(0)} kcal | '
-                          'P ${food.proteinPer100g.toStringAsFixed(1)} | '
-                          'C ${food.carbsPer100g.toStringAsFixed(1)} | '
-                          'F ${food.fatPer100g.toStringAsFixed(1)}',
-                        ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.add_circle, color: AppColors.primary),
-                          onPressed: authController.userEmail == null
-                              ? null
-                              : () => _showAddFoodDialog(
-                                    context: context,
-                                    food: food,
-                                    nutritionController: nutritionController,
-                                    userEmail: authController.userEmail!,
-                                  ),
-                        ),
-                      ),
-                    );
-                  }),
-                const SizedBox(height: 22),
-                const Text(
-                  'Meal Log Hari Ini',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 12),
-                ..._mealTypes.map((meal) {
-                  final logs = nutritionController.logsByMeal(meal);
-                  return _MealSection(
-                    title: meal,
-                    logs: logs,
-                    onEdit: (log) {
-                      if (authController.userEmail == null) return;
-                      _showEditFoodDialog(
-                        context: context,
-                        log: log,
-                        nutritionController: nutritionController,
-                        userEmail: authController.userEmail!,
-                      );
-                    },
-                    onDelete: (log) {
-                      if (authController.userEmail == null) return;
-                      _deleteFoodLog(
-                        context: context,
-                        log: log,
-                        nutritionController: nutritionController,
-                        userEmail: authController.userEmail!,
-                      );
-                    },
-                  );
-                }),
-              ],
-            ),
-          ),
-          if (_showAiChat)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: MediaQuery.of(context).size.height * 0.55,
-              child: _AiChatPanel(
-                messages: _aiMessages,
-                isTyping: _isAiTyping,
-                controller: _aiChatController,
-                onSend: _sendAiMessage,
-                onClose: () => setState(() => _showAiChat = false),
+      appBar: AppBar(title: const Text('Nutrisi Harian')),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          if (authController.userEmail != null) {
+            await nutritionController.loadDailyData(authController.userEmail!);
+          }
+        },
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          children: [
+            _HeaderDateCard(
+              dateText: DateFormat(
+                'EEEE, dd MMM yyyy',
+              ).format(nutritionController.selectedDate),
+              goal: user?.goal ?? 'Maintain',
+              onTapDate: () => _pickDate(
+                context,
+                nutritionController,
+                authController.userEmail,
               ),
             ),
-        ],
+            const SizedBox(height: 16),
+            _OverviewCard(
+              totalCalories: nutritionController.totalCalories,
+              targetCalories: targetCalories,
+              totalProtein: nutritionController.totalProtein,
+              totalCarbs: nutritionController.totalCarbs,
+              totalFat: nutritionController.totalFat,
+              calorieProgress: calorieProgress,
+            ),
+            const SizedBox(height: 16),
+            _WaterCard(
+              totalWaterMl: nutritionController.totalWaterMl,
+              targetWaterMl: targetWater,
+              progress: waterProgress,
+              onAdd: authController.userEmail == null
+                  ? null
+                  : () => _showAddWaterDialog(
+                      context: context,
+                      nutritionController: nutritionController,
+                      userEmail: authController.userEmail!,
+                    ),
+              shakeEnabled: _shakeEnabled,
+              onToggleShake: (v) => setState(() => _shakeEnabled = v),
+            ),
+            const SizedBox(height: 16),
+            _InsightCard(
+              text: nutritionController.buildDailySummary(
+                targetCalories: targetCalories,
+                targetProtein: targetProtein,
+                targetWaterMl: targetWater,
+                goal: user?.goal ?? 'Maintain',
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      labelText: 'Cari makanan',
+                      hintText: 'Contoh: chicken, bread, milk',
+                      suffixIcon: IconButton(
+                        onPressed: () {
+                          nutritionController.searchFoods(
+                            _searchController.text,
+                          );
+                        },
+                        icon: const Icon(Icons.search),
+                      ),
+                    ),
+                    onSubmitted: nutritionController.searchFoods,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Tooltip(
+                  message: 'Scan foto makanan',
+                  child: InkWell(
+                    onTap: () => _scanFoodPhoto(
+                      context,
+                      nutritionController,
+                      authController.userEmail,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      width: 54,
+                      height: 54,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppColors.primary, AppColors.primaryLight],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.3),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (nutritionController.isSearching)
+              const Center(child: CircularProgressIndicator())
+            else if (_searchController.text.isNotEmpty &&
+                nutritionController.searchResults.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'Makanan tidak ditemukan atau API tidak memberi hasil.',
+                  textAlign: TextAlign.center,
+                ),
+              )
+            else
+              ...nutritionController.searchResults.take(8).map((food) {
+                return Card(
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    title: Text(
+                      food.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      'per 100g • ${food.caloriesPer100g.toStringAsFixed(0)} kcal | '
+                      'P ${food.proteinPer100g.toStringAsFixed(1)} | '
+                      'C ${food.carbsPer100g.toStringAsFixed(1)} | '
+                      'F ${food.fatPer100g.toStringAsFixed(1)}',
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(
+                        Icons.add_circle,
+                        color: AppColors.primary,
+                      ),
+                      onPressed: authController.userEmail == null
+                          ? null
+                          : () => _showAddFoodDialog(
+                              context: context,
+                              food: food,
+                              nutritionController: nutritionController,
+                              userEmail: authController.userEmail!,
+                            ),
+                    ),
+                  ),
+                );
+              }),
+            const SizedBox(height: 22),
+            const Text(
+              'Meal Log Hari Ini',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 12),
+            ..._mealTypes.map((meal) {
+              final logs = nutritionController.logsByMeal(meal);
+              return _MealSection(
+                title: meal,
+                logs: logs,
+                onEdit: (log) {
+                  if (authController.userEmail == null) return;
+                  _showEditFoodDialog(
+                    context: context,
+                    log: log,
+                    nutritionController: nutritionController,
+                    userEmail: authController.userEmail!,
+                  );
+                },
+                onDelete: (log) {
+                  if (authController.userEmail == null) return;
+                  _deleteFoodLog(
+                    context: context,
+                    log: log,
+                    nutritionController: nutritionController,
+                    userEmail: authController.userEmail!,
+                  );
+                },
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
@@ -1002,222 +901,6 @@ class _NutritionPageState extends State<NutritionPage> {
         children: [
           Text(title),
           Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// AI CHAT PANEL
-// ═══════════════════════════════════════════════════════════════════
-class _AiChatPanel extends StatelessWidget {
-  const _AiChatPanel({
-    required this.messages,
-    required this.isTyping,
-    required this.controller,
-    required this.onSend,
-    required this.onClose,
-  });
-
-  final List<Map<String, dynamic>> messages;
-  final bool isTyping;
-  final TextEditingController controller;
-  final VoidCallback onSend;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppColors.primary, AppColors.primaryLight],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.smart_toy_rounded, color: Colors.white),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AI Nutrition Coach',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                        ),
-                      ),
-                      Text(
-                        'Powered by LLM',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: onClose,
-                  icon: const Icon(Icons.close, color: Colors.white),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: messages.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 48,
-                          color: AppColors.primary.withOpacity(0.3),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Tanyakan apa saja tentang nutrisi!',
-                          style: TextStyle(color: AppColors.textSecondary),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Contoh: "Saran makan malam rendah kalori"',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: messages.length,
-                    itemBuilder: (_, index) {
-                      final msg = messages[index];
-                      final isUser = msg['role'] == 'user';
-
-                      return Align(
-                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.75,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isUser ? AppColors.primary : AppColors.softCard,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(16),
-                              topRight: const Radius.circular(16),
-                              bottomLeft: Radius.circular(isUser ? 16 : 4),
-                              bottomRight: Radius.circular(isUser ? 4 : 16),
-                            ),
-                          ),
-                          child: Text(
-                            msg['text'],
-                            style: TextStyle(
-                              color: isUser ? Colors.white : AppColors.textPrimary,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (isTyping)
-            const Padding(
-              padding: EdgeInsets.only(left: 16, bottom: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'AI sedang mengetik...',
-                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                top: BorderSide(color: Colors.grey.shade200),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    decoration: InputDecoration(
-                      hintText: 'Tanyakan tentang nutrisi...',
-                      filled: true,
-                      fillColor: AppColors.softCard,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    onSubmitted: (_) => onSend(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: onSend,
-                  icon: const Icon(Icons.send_rounded),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -1267,7 +950,10 @@ class _HeaderDateCard extends StatelessWidget {
               color: Colors.white.withOpacity(0.18),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: const Icon(Icons.calendar_today_rounded, color: Colors.white),
+            child: const Icon(
+              Icons.calendar_today_rounded,
+              color: Colors.white,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1292,9 +978,7 @@ class _HeaderDateCard extends StatelessWidget {
           ),
           TextButton(
             onPressed: onTapDate,
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
-            ),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
             child: const Text('Ubah'),
           ),
         ],
@@ -1355,11 +1039,17 @@ class _OverviewCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: _macroBox('Protein', '${totalProtein.toStringAsFixed(1)} g'),
+                  child: _macroBox(
+                    'Protein',
+                    '${totalProtein.toStringAsFixed(1)} g',
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _macroBox('Karbo', '${totalCarbs.toStringAsFixed(1)} g'),
+                  child: _macroBox(
+                    'Karbo',
+                    '${totalCarbs.toStringAsFixed(1)} g',
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1392,10 +1082,7 @@ class _OverviewCard extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
           ),
         ],
       ),
@@ -1435,7 +1122,10 @@ class _WaterCard extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(18),
               ),
-              child: const Icon(Icons.water_drop_rounded, color: AppColors.primary),
+              child: const Icon(
+                Icons.water_drop_rounded,
+                color: AppColors.primary,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1473,7 +1163,9 @@ class _WaterCard extends StatelessWidget {
                       minHeight: 8,
                       value: progress,
                       backgroundColor: Colors.white,
-                      valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                      valueColor: const AlwaysStoppedAnimation(
+                        AppColors.primary,
+                      ),
                     ),
                   ),
                 ],
@@ -1530,7 +1222,10 @@ class _InsightCard extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
               ),
-              child: const Icon(Icons.auto_awesome_rounded, color: AppColors.primary),
+              child: const Icon(
+                Icons.auto_awesome_rounded,
+                color: AppColors.primary,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1575,7 +1270,10 @@ class _MealSection extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 12),
               if (logs.isEmpty)
@@ -1602,7 +1300,10 @@ class _MealSection extends StatelessWidget {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.restaurant_menu, color: AppColors.primary),
+                            const Icon(
+                              Icons.restaurant_menu,
+                              color: AppColors.primary,
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
@@ -1610,7 +1311,9 @@ class _MealSection extends StatelessWidget {
                                 children: [
                                   Text(
                                     log.foodName,
-                                    style: const TextStyle(fontWeight: FontWeight.w700),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
@@ -1694,8 +1397,9 @@ class _FoodScanResultSheetState extends State<_FoodScanResultSheet> {
   }
 
   Future<void> _analyze() async {
-    final results =
-        await FoodScannerService.instance.analyzeImage(widget.imageFile);
+    final results = await FoodScannerService.instance.analyzeImage(
+      widget.imageFile,
+    );
     if (!mounted) return;
     setState(() {
       _results = results;
@@ -1890,8 +1594,9 @@ class _FoodScanResultSheetState extends State<_FoodScanResultSheet> {
                               : AppColors.softCard,
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
-                            color:
-                                isSelected ? AppColors.primary : AppColors.border,
+                            color: isSelected
+                                ? AppColors.primary
+                                : AppColors.border,
                             width: isSelected ? 2 : 1,
                           ),
                         ),
@@ -2039,8 +1744,7 @@ class _FoodScanResultSheetState extends State<_FoodScanResultSheet> {
                       width: double.infinity,
                       height: 52,
                       child: ElevatedButton.icon(
-                        onPressed:
-                            widget.userEmail == null ? null : _addToLog,
+                        onPressed: widget.userEmail == null ? null : _addToLog,
                         style: ElevatedButton.styleFrom(
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
@@ -2063,8 +1767,7 @@ class _FoodScanResultSheetState extends State<_FoodScanResultSheet> {
     );
   }
 
-  Widget _nutriCell(
-      String label, String value, String unit, Color color) {
+  Widget _nutriCell(String label, String value, String unit, Color color) {
     return Expanded(
       child: Column(
         children: [

@@ -1,14 +1,11 @@
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'app.dart';
 import 'core/services/crypto_service.dart';
 import 'core/services/secure_storage_service.dart';
 import 'data/local/db/app_database.dart';
+import 'data/models/order_history_model.dart';
 import 'data/remote/food_api_service.dart';
 import 'data/repositories/activity_repository.dart';
 import 'data/repositories/auth_repository.dart';
@@ -23,11 +20,6 @@ import 'features/minigame/controllers/minigame_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
-  }
 
   final secureStorageService = SecureStorageService();
   final cryptoService = CryptoService();
@@ -49,6 +41,7 @@ void main() async {
   );
 
   await authController.initialize();
+  await OrderHistoryStore.instance.load();
 
   runApp(
     MultiProvider(
@@ -56,9 +49,8 @@ void main() async {
         ChangeNotifierProvider<AuthController>.value(value: authController),
 
         ChangeNotifierProvider<ActivityController>(
-          create: (_) => ActivityController(
-            activityRepository: activityRepository,
-          ),
+          create: (_) =>
+              ActivityController(activityRepository: activityRepository),
         ),
 
         ChangeNotifierProvider<NutritionController>(
@@ -69,15 +61,13 @@ void main() async {
         ),
 
         ChangeNotifierProvider<WorkoutController>(
-          create: (_) => WorkoutController(
-            workoutRepository: workoutRepository,
-          ),
+          create: (_) =>
+              WorkoutController(workoutRepository: workoutRepository),
         ),
 
         ChangeNotifierProvider<MinigameController>(
-          create: (_) => MinigameController(
-            workoutRepository: workoutRepository,
-          ),
+          create: (_) =>
+              MinigameController(workoutRepository: workoutRepository),
         ),
       ],
       child: const FitLifeApp(),

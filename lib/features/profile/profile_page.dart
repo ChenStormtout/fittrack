@@ -2,24 +2,93 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_colors.dart';
+import '../../data/models/order_history_model.dart';
 import '../auth/controllers/auth_controller.dart';
 import 'edit_profile_page.dart';
+import 'order_history_page.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
+
+  // ── Logout Confirmation ──────────────────────────────────────
+  Future<void> _confirmLogout(
+    BuildContext context,
+    AuthController authCtrl,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3F2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.logout_rounded,
+                color: AppColors.error,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'Keluar?',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Kamu yakin ingin logout dari FitTrack? Kamu perlu login kembali untuk mengakses akunmu.',
+          style: TextStyle(color: AppColors.textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              'Batal',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 0,
+            ),
+            child: const Text(
+              'Ya, Logout',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      authCtrl.logout();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final authController = context.watch<AuthController>();
     final user = authController.currentUser;
 
-    final name = (user?.fullName?.isNotEmpty ?? false) ? user!.fullName! : 'FitLife User';
+    final name = (user?.fullName?.isNotEmpty ?? false)
+        ? user!.fullName!
+        : 'FitLife User';
     final goal = user?.goal ?? 'Belum diatur';
+    final orders = OrderHistoryStore.instance.orders;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profil'),
-      ),
+      appBar: AppBar(title: const Text('Profil')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
@@ -63,7 +132,10 @@ class ProfilePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.18),
                     borderRadius: BorderRadius.circular(20),
@@ -123,6 +195,7 @@ class ProfilePage extends StatelessWidget {
               ),
             ),
           ),
+
           const SizedBox(height: 18),
           Card(
             child: Padding(
@@ -136,16 +209,45 @@ class ProfilePage extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const EditProfilePage()),
+                        MaterialPageRoute(
+                          builder: (_) => const EditProfilePage(),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _ActionTile(
+                    icon: Icons.receipt_long_outlined,
+                    title: 'Riwayat Pembelian',
+                    subtitle: '${orders.length} pesanan dari FitLife Shop',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const OrderHistoryPage(),
+                        ),
                       );
                     },
                   ),
                   const SizedBox(height: 10),
                   _ActionTile(
                     icon: Icons.fingerprint_rounded,
-                    title: 'Aktifkan Biometric',
-                    subtitle: 'Login lebih cepat dengan autentikasi perangkat',
+                    title: authController.biometricEnabled
+                        ? 'Biometric Aktif'
+                        : 'Aktifkan Biometric',
+                    subtitle: authController.biometricEnabled
+                        ? 'Login biometric siap digunakan'
+                        : 'Login lebih cepat dengan autentikasi perangkat',
                     onTap: () async {
+                      if (authController.biometricEnabled) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Biometric sudah aktif'),
+                          ),
+                        );
+                        return;
+                      }
+
                       final success = await authController.enableBiometric();
 
                       if (!context.mounted) return;
@@ -165,7 +267,7 @@ class ProfilePage extends StatelessWidget {
                     icon: Icons.logout_rounded,
                     title: 'Logout',
                     subtitle: 'Keluar dari akun saat ini',
-                    onTap: () => authController.logout(),
+                    onTap: () => _confirmLogout(context, authController),
                     danger: true,
                   ),
                 ],
@@ -180,7 +282,10 @@ class ProfilePage extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: const [
-                  Icon(Icons.lightbulb_outline_rounded, color: AppColors.primary),
+                  Icon(
+                    Icons.lightbulb_outline_rounded,
+                    color: AppColors.primary,
+                  ),
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -204,10 +309,7 @@ class ProfilePage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(title, style: const TextStyle(color: AppColors.textSecondary)),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -215,10 +317,7 @@ class ProfilePage extends StatelessWidget {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.title,
-    required this.value,
-  });
+  const _StatCard({required this.title, required this.value});
 
   final String title;
   final String value;
@@ -244,10 +343,7 @@ class _StatCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
             textAlign: TextAlign.center,
           ),
         ],
@@ -309,10 +405,7 @@ class _ActionTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(fontSize: 12),
-                  ),
+                  Text(subtitle, style: const TextStyle(fontSize: 12)),
                 ],
               ),
             ),

@@ -10,7 +10,7 @@ class FitLifeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final authController = context.watch<AuthController>();
+    final authController = context.read<AuthController>();
     final router = AppRouter.router(authController);
 
     return MaterialApp.router(

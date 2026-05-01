@@ -23,6 +23,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isBiometricLoading = false;
 
   @override
   void dispose() {
@@ -49,14 +50,34 @@ class _LoginPageState extends State<LoginPage> {
       context.go(AppRoutes.root);
     } else {
       final message = authController.errorMessage ?? 'Login gagal';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  Future<void> _submitBiometric() async {
+    setState(() => _isBiometricLoading = true);
+
+    final authController = context.read<AuthController>();
+    final success = await authController.loginWithBiometric();
+
+    if (!mounted) return;
+    setState(() => _isBiometricLoading = false);
+
+    if (success) {
+      context.go(AppRoutes.root);
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        const SnackBar(content: Text('Biometric gagal atau tidak tersedia')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final authController = context.watch<AuthController>();
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -74,7 +95,11 @@ class _LoginPageState extends State<LoginPage> {
                       color: AppColors.primary.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Icon(Icons.spa_rounded, size: 36, color: AppColors.primary),
+                    child: const Icon(
+                      Icons.spa_rounded,
+                      size: 36,
+                      color: AppColors.primary,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   const Text(
@@ -114,6 +139,28 @@ class _LoginPageState extends State<LoginPage> {
                           isLoading: _isLoading,
                           onPressed: _submit,
                         ),
+                        if (authController.canUseBiometricLogin) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 50,
+                            child: OutlinedButton.icon(
+                              onPressed: _isBiometricLoading
+                                  ? null
+                                  : _submitBiometric,
+                              icon: _isBiometricLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.fingerprint_rounded),
+                              label: const Text('Gunakan Biometric'),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

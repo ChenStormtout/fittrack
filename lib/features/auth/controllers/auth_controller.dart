@@ -9,8 +9,8 @@ class AuthController extends ChangeNotifier {
   AuthController({
     required SecureStorageService secureStorageService,
     required AuthRepository authRepository,
-  })  : _secureStorageService = secureStorageService,
-        _authRepository = authRepository;
+  }) : _secureStorageService = secureStorageService,
+       _authRepository = authRepository;
 
   final SecureStorageService _secureStorageService;
   final AuthRepository _authRepository;
@@ -19,6 +19,7 @@ class AuthController extends ChangeNotifier {
   bool _isLoggedIn = false;
   bool _isInitialized = false;
   bool _biometricEnabled = false;
+  bool _hasSavedSession = false;
 
   String? _userEmail;
   String? _errorMessage;
@@ -27,17 +28,30 @@ class AuthController extends ChangeNotifier {
   bool get isLoggedIn => _isLoggedIn;
   bool get isInitialized => _isInitialized;
   bool get biometricEnabled => _biometricEnabled;
+  bool get hasSavedSession => _hasSavedSession;
+  bool get canUseBiometricLogin =>
+      _biometricEnabled &&
+      _hasSavedSession &&
+      (_userEmail?.isNotEmpty ?? false);
   String? get userEmail => _userEmail;
   String? get errorMessage => _errorMessage;
   UserModel? get currentUser => _currentUser;
+
+  void requireLoginOnLaunch() {
+    _isLoggedIn = false;
+    _currentUser = null;
+    notifyListeners();
+  }
 
   Future<void> initialize() async {
     final token = await _secureStorageService.getSessionToken();
     final email = await _secureStorageService.getSessionEmail();
     final biometric = await _secureStorageService.getBiometricEnabled();
 
-    _isLoggedIn = token != null && token.isNotEmpty;
-    _userEmail = email;
+    _hasSavedSession =
+        token != null && token.isNotEmpty && email != null && email.isNotEmpty;
+    _isLoggedIn = false;
+    _userEmail = _hasSavedSession ? email : null;
     _biometricEnabled = biometric;
 
     if (_userEmail != null) {
@@ -74,10 +88,7 @@ class AuthController extends ChangeNotifier {
     }
   }
 
-  Future<bool> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<bool> login({required String email, required String password}) async {
     _errorMessage = null;
 
     try {
@@ -100,6 +111,7 @@ class AuthController extends ChangeNotifier {
       );
 
       _isLoggedIn = true;
+      _hasSavedSession = true;
       _userEmail = normalizedEmail;
       _currentUser = await _authRepository.getCurrentUser(normalizedEmail);
 
@@ -128,8 +140,15 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> loginWithBiometric() async {
-    if (!_isLoggedIn) return false;
-    return await _biometricService.authenticate();
+    if (!canUseBiometricLogin || _userEmail == null) return false;
+
+    final success = await _biometricService.authenticate();
+    if (!success) return false;
+
+    _isLoggedIn = true;
+    _currentUser = await _authRepository.getCurrentUser(_userEmail!);
+    notifyListeners();
+    return true;
   }
 
   Future<bool> updateProfile({
@@ -169,9 +188,20 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    await _secureStorageService.clearSession();
+    final keepBiometricSession =
+        _biometricEnabled && (_userEmail?.isNotEmpty ?? false);
+
+    if (!keepBiometricSession) {
+      await _secureStorageService.clearSession();
+      await _secureStorageService.setBiometricEnabled(false);
+      _hasSavedSession = false;
+      _biometricEnabled = false;
+      _userEmail = null;
+    } else {
+      _hasSavedSession = true;
+    }
+
     _isLoggedIn = false;
-    _userEmail = null;
     _currentUser = null;
     notifyListeners();
   }

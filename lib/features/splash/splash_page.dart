@@ -25,28 +25,12 @@ class _SplashPageState extends State<SplashPage> {
     if (!mounted) return;
 
     final authController = context.read<AuthController>();
-
-    if (authController.isLoggedIn) {
-      if (authController.biometricEnabled) {
-        final success = await authController.loginWithBiometric();
-
-        if (success) {
-          context.go(AppRoutes.root);
-        } else {
-          context.go(AppRoutes.login);
-        }
-      } else {
-        context.go(AppRoutes.root);
-      }
-    } else {
-      context.go(AppRoutes.login);
-    }
+    authController.requireLoginOnLaunch();
+    context.go(AppRoutes.login);
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator()),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }
