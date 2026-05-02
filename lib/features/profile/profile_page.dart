@@ -5,7 +5,7 @@ import '../../core/constants/app_colors.dart';
 import '../../data/models/order_history_model.dart';
 import '../auth/controllers/auth_controller.dart';
 import 'edit_profile_page.dart';
-import 'order_history_page.dart';
+
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -215,20 +215,7 @@ class ProfilePage extends StatelessWidget {
                       );
                     },
                   ),
-                  const SizedBox(height: 10),
-                  _ActionTile(
-                    icon: Icons.receipt_long_outlined,
-                    title: 'Riwayat Pembelian',
-                    subtitle: '${orders.length} pesanan dari FitLife Shop',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const OrderHistoryPage(),
-                        ),
-                      );
-                    },
-                  ),
+                  
                   const SizedBox(height: 10),
                   _ActionTile(
                     icon: Icons.fingerprint_rounded,
