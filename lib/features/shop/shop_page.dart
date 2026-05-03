@@ -8,6 +8,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // pubspec.yaml — pastikan ada:
 //   dependencies:
@@ -17,6 +18,7 @@ import 'package:intl/intl.dart';
 //     latlong2: ^0.9.0
 //     flutter_local_notifications: ^17.0.0
 //     intl: ^0.19.0
+//     shared_preferences: ^2.2.3
 //
 // Android → AndroidManifest.xml (dalam <manifest>):
 //   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
@@ -352,21 +354,120 @@ class OrderHistoryItem {
     required this.recipientName,
     required this.deliveryAddress,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'orderId': orderId,
+      'productNames': productNames,
+      'totalItems': totalItems,
+      'totalPrice': totalPrice,
+      'orderDate': orderDate.toIso8601String(),
+      'statusIndex': status.index,
+      'paymentMethod': paymentMethod,
+      'recipientName': recipientName,
+      'deliveryAddress': deliveryAddress,
+    };
+  }
+
+  factory OrderHistoryItem.fromJson(Map<String, dynamic> json) {
+    final rawProductNames = json['productNames'];
+    final rawTotalItems = json['totalItems'];
+    final rawTotalPrice = json['totalPrice'];
+    final rawStatusIndex = json['statusIndex'];
+
+    int statusIndex = 0;
+    if (rawStatusIndex is int) {
+      statusIndex = rawStatusIndex;
+    }
+
+    if (statusIndex < 0 || statusIndex >= OrderStatus.values.length) {
+      statusIndex = 0;
+    }
+
+    return OrderHistoryItem(
+      orderId: json['orderId']?.toString() ?? '',
+      productNames: rawProductNames is List
+          ? rawProductNames.map((item) => item.toString()).toList()
+          : <String>[],
+      totalItems: rawTotalItems is int ? rawTotalItems : 0,
+      totalPrice: rawTotalPrice is num ? rawTotalPrice.toDouble() : 0.0,
+      orderDate: DateTime.tryParse(json['orderDate']?.toString() ?? '') ??
+          DateTime.now(),
+      status: OrderStatus.values[statusIndex],
+      paymentMethod: json['paymentMethod']?.toString() ?? '',
+      recipientName: json['recipientName']?.toString() ?? '',
+      deliveryAddress: json['deliveryAddress']?.toString() ?? '',
+    );
+  }
 }
 
 class OrderHistoryStore {
   OrderHistoryStore._();
   static final OrderHistoryStore instance = OrderHistoryStore._();
 
+  static const String _storageKey = 'fitlife_order_history';
+
   final List<OrderHistoryItem> _orders = [];
-  List<OrderHistoryItem> get orders => List.unmodifiable(_orders.reversed.toList());
+
+  List<OrderHistoryItem> get orders =>
+      List.unmodifiable(_orders.reversed.toList());
 
   static String generateId() =>
       'FL${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
+  Future<void> loadOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedData = prefs.getString(_storageKey);
+
+    if (savedData == null || savedData.isEmpty) {
+      return;
+    }
+
+    try {
+      final decodedData = jsonDecode(savedData);
+
+      if (decodedData is List) {
+        _orders
+          ..clear()
+          ..addAll(
+            decodedData
+                .whereType<Map>()
+                .map(
+                  (item) => OrderHistoryItem.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList(),
+          );
+      }
+    } catch (_) {
+      _orders.clear();
+    }
+  }
+
   Future<void> addOrder(OrderHistoryItem order) async {
-    await Future.delayed(const Duration(milliseconds: 100));
     _orders.add(order);
+    await _saveOrders();
+  }
+
+  Future<void> updateStatus(String orderId, OrderStatus newStatus) async {
+    final index = _orders.indexWhere((order) => order.orderId == orderId);
+
+    if (index == -1) {
+      return;
+    }
+
+    _orders[index].status = newStatus;
+    await _saveOrders();
+  }
+
+  Future<void> _saveOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final encodedData = jsonEncode(
+      _orders.map((order) => order.toJson()).toList(),
+    );
+
+    await prefs.setString(_storageKey, encodedData);
   }
 }
 
@@ -407,13 +508,29 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _cartAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 280));
+
+    _cartAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+
     _cartScale = TweenSequence([
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.45), weight: 50),
       TweenSequenceItem(tween: Tween(begin: 1.45, end: 1.0), weight: 50),
-    ]).animate(CurvedAnimation(parent: _cartAnim, curve: Curves.easeInOut));
-    // Init local notification
+    ]).animate(
+      CurvedAnimation(parent: _cartAnim, curve: Curves.easeInOut),
+    );
+
     NotificationService.instance.init();
+    _loadOrderHistory();
+  }
+
+  Future<void> _loadOrderHistory() async {
+    await OrderHistoryStore.instance.loadOrders();
+
+    if (!mounted) return;
+
+    setState(() {});
   }
 
   @override
@@ -986,9 +1103,22 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   }
 
   void _showOrderDetail(OrderHistoryItem order) => showModalBottomSheet(
-    context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-    builder: (_) => _OrderDetailSheet(order: order, currency: _currency, selCur: _selCur,
-      onStatusChange: (newStatus) => setState(() => order.status = newStatus)),
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _OrderDetailSheet(
+      order: order,
+      currency: _currency,
+      selCur: _selCur,
+      onStatusChange: (newStatus) {
+        OrderHistoryStore.instance
+            .updateStatus(order.orderId, newStatus)
+            .then((_) {
+          if (!mounted) return;
+          setState(() {});
+        });
+      },
+    ),
   );
 
   // ============================================================
