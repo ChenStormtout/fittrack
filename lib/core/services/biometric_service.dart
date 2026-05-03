@@ -4,19 +4,29 @@ class BiometricService {
   final LocalAuthentication _auth = LocalAuthentication();
 
   Future<bool> canCheckBiometrics() async {
-    return await _auth.canCheckBiometrics;
+    try {
+      final isSupported = await _auth.isDeviceSupported();
+      return isSupported;
+    } catch (e) {
+      return false;
+    }
   }
 
   Future<bool> authenticate() async {
     try {
+      final isSupported = await _auth.isDeviceSupported();
+      if (!isSupported) return false;
+
       return await _auth.authenticate(
-        localizedReason: 'Login menggunakan biometrik',
+        localizedReason: 'Verifikasi identitas untuk login',
         options: const AuthenticationOptions(
-          biometricOnly: true,
+          biometricOnly: false,
           stickyAuth: true,
+          sensitiveTransaction: false,
         ),
       );
     } catch (e) {
+      print('Biometric error: $e');
       return false;
     }
   }

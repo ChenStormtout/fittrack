@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-
 import '../../../core/services/biometric_service.dart';
 import '../../../core/services/secure_storage_service.dart';
 import '../../../data/models/user_model.dart';
@@ -53,19 +52,16 @@ class AuthController extends ChangeNotifier {
     required String password,
   }) async {
     _errorMessage = null;
-
     try {
       final success = await _authRepository.register(
         email: email,
         password: password,
       );
-
       if (!success) {
         _errorMessage = 'Email sudah terdaftar';
         notifyListeners();
         return false;
       }
-
       return true;
     } catch (e) {
       _errorMessage = 'Error register: $e';
@@ -79,13 +75,11 @@ class AuthController extends ChangeNotifier {
     required String password,
   }) async {
     _errorMessage = null;
-
     try {
       final success = await _authRepository.login(
         email: email,
         password: password,
       );
-
       if (!success) {
         _errorMessage = 'Email atau password salah';
         notifyListeners();
@@ -102,7 +96,6 @@ class AuthController extends ChangeNotifier {
       _isLoggedIn = true;
       _userEmail = normalizedEmail;
       _currentUser = await _authRepository.getCurrentUser(normalizedEmail);
-
       notifyListeners();
       return true;
     } catch (e) {
@@ -113,8 +106,7 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> enableBiometric() async {
-    final canUse = await _biometricService.canCheckBiometrics();
-    if (!canUse) return false;
+    if (_userEmail == null) return false;
 
     final success = await _biometricService.authenticate();
 
@@ -123,13 +115,34 @@ class AuthController extends ChangeNotifier {
       await _secureStorageService.setBiometricEnabled(true);
       notifyListeners();
     }
-
     return success;
   }
 
   Future<bool> loginWithBiometric() async {
-    if (!_isLoggedIn) return false;
-    return await _biometricService.authenticate();
+    final biometricEnabled = await _secureStorageService.getBiometricEnabled();
+    final email = await _secureStorageService.getSessionEmail();
+
+    print('loginWithBiometric - biometricEnabled: $biometricEnabled, email: $email');
+
+    if (!biometricEnabled || email == null) return false;
+
+    final success = await _biometricService.authenticate();
+
+    if (success) {
+      _userEmail = email;
+      _currentUser = await _authRepository.getCurrentUser(email);
+      _isLoggedIn = true;
+      _biometricEnabled = true;
+
+      await _secureStorageService.saveSession(
+        token: 'session_${DateTime.now().millisecondsSinceEpoch}',
+        email: email,
+      );
+
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 
   Future<bool> updateProfile({
@@ -159,7 +172,6 @@ class AuthController extends ChangeNotifier {
         _currentUser = await _authRepository.getCurrentUser(_userEmail!);
         notifyListeners();
       }
-
       return success;
     } catch (e) {
       _errorMessage = 'Error update profile: $e';
@@ -169,10 +181,18 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Hanya hapus token, email tetap tersimpan untuk biometric
     await _secureStorageService.clearSession();
     _isLoggedIn = false;
     _userEmail = null;
     _currentUser = null;
+    // TIDAK reset _biometricEnabled
+    notifyListeners();
+  }
+
+  Future<void> resetBiometric() async {
+    await _secureStorageService.setBiometricEnabled(false);
+    _biometricEnabled = false;
     notifyListeners();
   }
 }

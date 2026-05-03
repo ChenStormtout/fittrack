@@ -23,12 +23,11 @@ class SecureStorageService {
     return _storage.read(key: _emailKey);
   }
 
+  // Hanya hapus token, email tetap untuk biometric
   Future<void> clearSession() async {
     await _storage.delete(key: _sessionKey);
-    await _storage.delete(key: _emailKey);
   }
 
-  // 🔐 BIOMETRIC
   Future<void> setBiometricEnabled(bool value) async {
     await _storage.write(key: _biometricKey, value: value.toString());
   }
@@ -36,5 +35,15 @@ class SecureStorageService {
   Future<bool> getBiometricEnabled() async {
     final value = await _storage.read(key: _biometricKey);
     return value == 'true';
+  }
+
+  Future<void> clearBiometric() async {
+    await _storage.delete(key: _biometricKey);
+  }
+
+  Future<void> clearAllAuthData() async {
+    await _storage.delete(key: _sessionKey);
+    await _storage.delete(key: _emailKey);
+    await _storage.delete(key: _biometricKey);
   }
 }

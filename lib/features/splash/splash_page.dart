@@ -26,18 +26,9 @@ class _SplashPageState extends State<SplashPage> {
 
     final authController = context.read<AuthController>();
 
+    // Langsung ke root jika sudah login, tidak perlu biometric lagi
     if (authController.isLoggedIn) {
-      if (authController.biometricEnabled) {
-        final success = await authController.loginWithBiometric();
-
-        if (success) {
-          context.go(AppRoutes.root);
-        } else {
-          context.go(AppRoutes.login);
-        }
-      } else {
-        context.go(AppRoutes.root);
-      }
+      context.go(AppRoutes.root);
     } else {
       context.go(AppRoutes.login);
     }

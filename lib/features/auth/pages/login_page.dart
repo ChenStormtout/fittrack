@@ -1,3 +1,4 @@
+// login_page.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -23,6 +24,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isBiometricLoading = false;
 
   @override
   void dispose() {
@@ -55,8 +57,28 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _loginWithBiometric() async {
+    setState(() => _isBiometricLoading = true);
+
+    final authController = context.read<AuthController>();
+    final success = await authController.loginWithBiometric();
+
+    if (!mounted) return;
+    setState(() => _isBiometricLoading = false);
+
+    if (success) {
+      context.go(AppRoutes.root);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Biometric gagal atau belum diaktifkan')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final biometricEnabled = context.watch<AuthController>().biometricEnabled;
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -74,12 +96,19 @@ class _LoginPageState extends State<LoginPage> {
                       color: AppColors.primary.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Icon(Icons.spa_rounded, size: 36, color: AppColors.primary),
+                    child: const Icon(
+                      Icons.spa_rounded,
+                      size: 36,
+                      color: AppColors.primary,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   const Text(
                     AppStrings.loginTitle,
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -114,6 +143,49 @@ class _LoginPageState extends State<LoginPage> {
                           isLoading: _isLoading,
                           onPressed: _submit,
                         ),
+                        if (biometricEnabled) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: OutlinedButton.icon(
+                              onPressed: _isBiometricLoading
+                                  ? null
+                                  : _loginWithBiometric,
+                              icon: _isBiometricLoading
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.primary,
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.fingerprint_rounded,
+                                      color: AppColors.primary,
+                                      size: 24,
+                                    ),
+                              label: Text(
+                                _isBiometricLoading
+                                    ? 'Memverifikasi...'
+                                    : 'Login dengan Biometric',
+                                style: const TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: AppColors.primary.withOpacity(0.5),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
