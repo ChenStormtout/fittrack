@@ -3,23 +3,30 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart' show placemarkFromCoordinates, Placemark;
 import 'package:http/http.dart' as http;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // pubspec.yaml — pastikan ada:
 //   dependencies:
 //     geolocator: ^11.0.0
-//     geocoding: ^3.0.0
 //     http: ^1.2.0
 //     flutter_map: ^6.1.0
 //     latlong2: ^0.9.0
+//     flutter_local_notifications: ^17.0.0
+//     intl: ^0.19.0
+//     shared_preferences: ^2.2.3
 //
 // Android → AndroidManifest.xml (dalam <manifest>):
 //   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 //   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 //   <uses-permission android:name="android.permission.INTERNET"/>
+//   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+//   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+//   android:enableOnBackInvokedCallback="true"  ← tambah di tag <application>
 //
 // iOS → Info.plist:
 //   <key>NSLocationWhenInUseUsageDescription</key>
@@ -48,6 +55,63 @@ class AppColors {
   static const Color warning = Color(0xFFF9A825);
   static const Color error = Color(0xFFD32F2F);
   static const Color info = Color(0xFF2E7D32);
+}
+
+// ============================================================
+// NOTIFICATION SERVICE
+// ============================================================
+
+class NotificationService {
+  NotificationService._();
+  static final NotificationService instance = NotificationService._();
+
+  final _plugin = FlutterLocalNotificationsPlugin();
+  bool _ready = false;
+
+  Future<void> init() async {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const ios = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+    await _plugin.initialize(
+      const InitializationSettings(android: android, iOS: ios),
+    );
+    // Minta izin Android 13+
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+    _ready = true;
+  }
+
+  Future<void> showOrderSuccess({
+    required String orderId,
+    required String paymentMethod,
+    required String totalPrice,
+    required int itemCount,
+  }) async {
+    if (!_ready) return;
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'fitlife_order',            // channel id
+        'FitLife Order',            // channel name
+        channelDescription: 'Notifikasi pesanan FitLife Shop',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+        color: Color(0xFF2E7D32),
+        styleInformation: BigTextStyleInformation(''),
+      ),
+      iOS: DarwinNotificationDetails(badgeNumber: 1),
+    );
+    await _plugin.show(
+      orderId.hashCode,
+      '✅ Pesanan Berhasil Dibuat!',
+      '$itemCount item • $totalPrice • $paymentMethod',
+      details,
+    );
+  }
 }
 
 // ============================================================
@@ -231,8 +295,183 @@ class CurrencyService {
 }
 
 // ============================================================
-// SHOP PAGE
+// ORDER HISTORY MODEL & STORE
 // ============================================================
+
+enum OrderStatus { pending, packed, shipped, delivered, cancelled }
+
+extension OrderStatusExt on OrderStatus {
+  String get label {
+    switch (this) {
+      case OrderStatus.pending:   return 'Menunggu';
+      case OrderStatus.packed:    return 'Dikemas';
+      case OrderStatus.shipped:   return 'Dikirim';
+      case OrderStatus.delivered: return 'Diterima';
+      case OrderStatus.cancelled: return 'Dibatalkan';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case OrderStatus.pending:   return const Color(0xFFF9A825);
+      case OrderStatus.packed:    return const Color(0xFF1565C0);
+      case OrderStatus.shipped:   return const Color(0xFF6A1B9A);
+      case OrderStatus.delivered: return const Color(0xFF2E7D32);
+      case OrderStatus.cancelled: return const Color(0xFFD32F2F);
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case OrderStatus.pending:   return Icons.hourglass_top_rounded;
+      case OrderStatus.packed:    return Icons.inventory_2_rounded;
+      case OrderStatus.shipped:   return Icons.local_shipping_rounded;
+      case OrderStatus.delivered: return Icons.check_circle_rounded;
+      case OrderStatus.cancelled: return Icons.cancel_rounded;
+    }
+  }
+}
+
+class OrderHistoryItem {
+  final String orderId;
+  final List<String> productNames;
+  final int totalItems;
+  final double totalPrice;
+  final DateTime orderDate;
+  OrderStatus status;
+  final String paymentMethod;
+  final String recipientName;
+  final String deliveryAddress;
+
+  OrderHistoryItem({
+    required this.orderId,
+    required this.productNames,
+    required this.totalItems,
+    required this.totalPrice,
+    required this.orderDate,
+    required this.status,
+    required this.paymentMethod,
+    required this.recipientName,
+    required this.deliveryAddress,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'orderId': orderId,
+      'productNames': productNames,
+      'totalItems': totalItems,
+      'totalPrice': totalPrice,
+      'orderDate': orderDate.toIso8601String(),
+      'statusIndex': status.index,
+      'paymentMethod': paymentMethod,
+      'recipientName': recipientName,
+      'deliveryAddress': deliveryAddress,
+    };
+  }
+
+  factory OrderHistoryItem.fromJson(Map<String, dynamic> json) {
+    final rawProductNames = json['productNames'];
+    final rawTotalItems = json['totalItems'];
+    final rawTotalPrice = json['totalPrice'];
+    final rawStatusIndex = json['statusIndex'];
+
+    int statusIndex = 0;
+    if (rawStatusIndex is int) {
+      statusIndex = rawStatusIndex;
+    }
+
+    if (statusIndex < 0 || statusIndex >= OrderStatus.values.length) {
+      statusIndex = 0;
+    }
+
+    return OrderHistoryItem(
+      orderId: json['orderId']?.toString() ?? '',
+      productNames: rawProductNames is List
+          ? rawProductNames.map((item) => item.toString()).toList()
+          : <String>[],
+      totalItems: rawTotalItems is int ? rawTotalItems : 0,
+      totalPrice: rawTotalPrice is num ? rawTotalPrice.toDouble() : 0.0,
+      orderDate: DateTime.tryParse(json['orderDate']?.toString() ?? '') ??
+          DateTime.now(),
+      status: OrderStatus.values[statusIndex],
+      paymentMethod: json['paymentMethod']?.toString() ?? '',
+      recipientName: json['recipientName']?.toString() ?? '',
+      deliveryAddress: json['deliveryAddress']?.toString() ?? '',
+    );
+  }
+}
+
+class OrderHistoryStore {
+  OrderHistoryStore._();
+  static final OrderHistoryStore instance = OrderHistoryStore._();
+
+  static const String _storageKey = 'fitlife_order_history';
+
+  final List<OrderHistoryItem> _orders = [];
+
+  List<OrderHistoryItem> get orders =>
+      List.unmodifiable(_orders.reversed.toList());
+
+  static String generateId() =>
+      'FL${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+
+  Future<void> loadOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedData = prefs.getString(_storageKey);
+
+    if (savedData == null || savedData.isEmpty) {
+      return;
+    }
+
+    try {
+      final decodedData = jsonDecode(savedData);
+
+      if (decodedData is List) {
+        _orders
+          ..clear()
+          ..addAll(
+            decodedData
+                .whereType<Map>()
+                .map(
+                  (item) => OrderHistoryItem.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList(),
+          );
+      }
+    } catch (_) {
+      _orders.clear();
+    }
+  }
+
+  Future<void> addOrder(OrderHistoryItem order) async {
+    _orders.add(order);
+    await _saveOrders();
+  }
+
+  Future<void> updateStatus(String orderId, OrderStatus newStatus) async {
+    final index = _orders.indexWhere((order) => order.orderId == orderId);
+
+    if (index == -1) {
+      return;
+    }
+
+    _orders[index].status = newStatus;
+    await _saveOrders();
+  }
+
+  Future<void> _saveOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final encodedData = jsonEncode(
+      _orders.map((order) => order.toJson()).toList(),
+    );
+
+    await prefs.setString(_storageKey, encodedData);
+  }
+}
+
+
 
 class ShopPage extends StatefulWidget {
   const ShopPage({super.key});
@@ -257,6 +496,7 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   String _sort    = 'Relevan';
   bool   _showCart = false;
   bool   _gridView = true;
+  int    _activeTab = 0; // 0=Shop, 1=Riwayat
 
   static const _categories = [
     'Semua','Kekuatan','Olahraga','Yoga','Teknologi',
@@ -268,11 +508,29 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _cartAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 280));
+
+    _cartAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+
     _cartScale = TweenSequence([
       TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.45), weight: 50),
       TweenSequenceItem(tween: Tween(begin: 1.45, end: 1.0), weight: 50),
-    ]).animate(CurvedAnimation(parent: _cartAnim, curve: Curves.easeInOut));
+    ]).animate(
+      CurvedAnimation(parent: _cartAnim, curve: Curves.easeInOut),
+    );
+
+    NotificationService.instance.init();
+    _loadOrderHistory();
+  }
+
+  Future<void> _loadOrderHistory() async {
+    await OrderHistoryStore.instance.loadOrders();
+
+    if (!mounted) return;
+
+    setState(() {});
   }
 
   @override
@@ -362,7 +620,10 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
       body: SafeArea(child: Column(children: [
         _topBar(),
         _timeStrip(),
-        Expanded(child: _showCart ? _cartView() : _shopView()),
+        _tabBar(),
+        Expanded(child: _activeTab == 1
+            ? _historyView()
+            : _showCart ? _cartView() : _shopView()),
       ])),
     );
   }
@@ -405,6 +666,37 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
       ),
     ]),
   );
+
+  // ── TAB BAR ──────────────────────────────────────────────
+  Widget _tabBar() => Container(
+    color: AppColors.surface,
+    child: Row(children: [
+      _tabItem(0, Icons.storefront_rounded, 'Toko'),
+      _tabItem(1, Icons.receipt_long_rounded, 'Riwayat'),
+    ]),
+  );
+
+  Widget _tabItem(int idx, IconData icon, String label) {
+    final active = _activeTab == idx;
+    return Expanded(child: GestureDetector(
+      onTap: () => setState(() { _activeTab = idx; if (idx == 0) _showCart = false; }),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(
+            color: active ? AppColors.primary : Colors.transparent, width: 2.5)),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 16,
+              color: active ? AppColors.primary : AppColors.textSecondary),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+              color: active ? AppColors.primary : AppColors.textSecondary)),
+        ]),
+      ),
+    ));
+  }
 
   // ── TIME ZONE STRIP ────────────────────────────────────────
   Widget _timeStrip() {
@@ -701,6 +993,135 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   );
 
   // ============================================================
+  // HISTORY VIEW
+  // ============================================================
+  Widget _historyView() {
+    final orders = OrderHistoryStore.instance.orders;
+    return Column(children: [
+      // Header
+      Container(
+        color: AppColors.surface,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Row(children: [
+          const Text('Riwayat Pesanan', style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          const Spacer(),
+          Text('${orders.length} pesanan',
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        ]),
+      ),
+      const Divider(height: 1, color: AppColors.border),
+      Expanded(child: orders.isEmpty
+          ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.receipt_long_outlined, size: 72, color: AppColors.sage),
+              const SizedBox(height: 16),
+              const Text('Belum ada pesanan', style: TextStyle(
+                  color: AppColors.textSecondary, fontSize: 15, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              const Text('Pesanan yang sudah dibeli akan muncul di sini',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: () => setState(() => _activeTab = 0),
+                child: const Text('Mulai belanja →', style: TextStyle(
+                    color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w700)),
+              ),
+            ]))
+          : ListView.separated(
+              padding: const EdgeInsets.all(14),
+              itemCount: orders.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) => _orderCard(orders[i]),
+            )),
+    ]);
+  }
+
+  Widget _orderCard(OrderHistoryItem order) {
+    return GestureDetector(
+      onTap: () => _showOrderDetail(order),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border, width: .8),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+              blurRadius: 6, offset: const Offset(0, 2))],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Header row
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: order.status.color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(order.status.icon, size: 12, color: order.status.color),
+                const SizedBox(width: 4),
+                Text(order.status.label, style: TextStyle(
+                    fontSize: 10, fontWeight: FontWeight.w700, color: order.status.color)),
+              ]),
+            ),
+            const Spacer(),
+            Text(DateFormat('dd MMM yyyy').format(order.orderDate),
+                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          ]),
+          const SizedBox(height: 10),
+          // Order ID + payment
+          Row(children: [
+            const Icon(Icons.tag, size: 12, color: AppColors.textSecondary),
+            const SizedBox(width: 4),
+            Text(order.orderId, style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const Spacer(),
+            Text(order.paymentMethod, style: const TextStyle(
+                fontSize: 11, color: AppColors.textSecondary)),
+          ]),
+          const SizedBox(height: 6),
+          // Products preview
+          Text(
+            order.productNames.take(2).join(', ') +
+                (order.productNames.length > 2 ? '  +${order.productNames.length - 2} lainnya' : ''),
+            style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 10),
+          const Divider(color: AppColors.border, height: 1),
+          const SizedBox(height: 10),
+          // Footer
+          Row(children: [
+            Text('${order.totalItems} item', style: const TextStyle(
+                fontSize: 12, color: AppColors.textSecondary)),
+            const Spacer(),
+            Text(_currency.format(order.totalPrice, _selCur), style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.primary)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  void _showOrderDetail(OrderHistoryItem order) => showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _OrderDetailSheet(
+      order: order,
+      currency: _currency,
+      selCur: _selCur,
+      onStatusChange: (newStatus) {
+        OrderHistoryStore.instance
+            .updateStatus(order.orderId, newStatus)
+            .then((_) {
+          if (!mounted) return;
+          setState(() {});
+        });
+      },
+    ),
+  );
+
+  // ============================================================
   // CART VIEW
   // ============================================================
   Widget _cartView() => Column(children: [
@@ -801,14 +1222,60 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
     builder: (_) => _CheckoutSheet(
       totalPrice: _totalPrice, totalItems: _totalItems,
       currency: _currency, selCur: _selCur,
-      onConfirm: (PaymentMethod method) {
+      cartItems: List.from(_cart),
+      onConfirm: (PaymentMethod method, String name, String address) async {
+        final snapItems   = List<CartItem>.from(_cart);
+        final snapTotal   = _totalPrice;
+        final snapItems_n = _totalItems;
+        final orderId     = OrderHistoryStore.generateId();
+
+        // Simpan ke riwayat
+        final productNames = snapItems
+            .map((c) => '${c.product.name} (x${c.quantity})')
+            .toList();
+        await OrderHistoryStore.instance.addOrder(OrderHistoryItem(
+          orderId: orderId,
+          productNames: productNames,
+          totalItems: snapItems_n,
+          totalPrice: snapTotal,
+          orderDate: DateTime.now(),
+          status: OrderStatus.packed,
+          paymentMethod: method.label,
+          recipientName: name,
+          deliveryAddress: address,
+        ));
+
+        if (!mounted) return;
         setState(() { _cart.clear(); _showCart = false; });
-        // Tampilkan notifikasi sukses yang berbeda sesuai metode
+
+        // 1. In-app toast
         Future.delayed(const Duration(milliseconds: 300), () {
+          if (!mounted) return;
           _showToast(
-            '  Pesanan berhasil dibuat!\nPembayaran via ${method.label}',
-            AppColors.primary,
-            Icons.check_circle_rounded,
+            '✅  Pesanan #$orderId berhasil!\nPembayaran via ${method.label}',
+            AppColors.primary, Icons.check_circle_rounded,
+          );
+        });
+
+        // 2. Local notification status bar
+        NotificationService.instance.showOrderSuccess(
+          orderId: orderId,
+          paymentMethod: method.label,
+          totalPrice: _currency.format(snapTotal, _selCur),
+          itemCount: snapItems_n,
+        );
+
+        // 3. Struk pembelian
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (!mounted) return;
+          showModalBottomSheet(
+            context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+            builder: (_) => _ReceiptSheet(
+              orderId: orderId, items: snapItems,
+              totalPrice: snapTotal, method: method,
+              currency: _currency, selCur: _selCur,
+              buyerName: name, address: address,
+            ),
           );
         });
       },
@@ -1036,10 +1503,14 @@ class _CheckoutSheet extends StatefulWidget {
   final int totalItems;
   final CurrencyService currency;
   final String selCur;
-  final void Function(PaymentMethod method) onConfirm;
+  final List<CartItem> cartItems;
+  final void Function(PaymentMethod method, String name, String address) onConfirm;
 
-  const _CheckoutSheet({required this.totalPrice, required this.totalItems,
-      required this.currency, required this.selCur, required this.onConfirm});
+  const _CheckoutSheet({
+    required this.totalPrice, required this.totalItems,
+    required this.currency,   required this.selCur,
+    required this.cartItems,  required this.onConfirm,
+  });
 
   @override
   State<_CheckoutSheet> createState() => _CheckoutSheetState();
@@ -1104,32 +1575,14 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
   Future<void> _reverseGeocode(ll.LatLng latLng) async {
     setState(() => _geocoding = true);
     try {
-      // Coba via Nominatim (lebih akurat + gratis)
       final addr = await _nominatimReverse(latLng.latitude, latLng.longitude);
       if (mounted) setState(() => _addressCtrl.text = addr);
     } catch (_) {
-      // Fallback: geocoding package
-      try {
-        final marks = await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
-        if (marks.isNotEmpty) {
-          final pm = marks.first;
-          final seen = <String>{};
-          final parts = <String>[];
-          void add(String? v) {
-            if (v == null || v.trim().isEmpty) return;
-            if (seen.add(v.trim().toLowerCase())) parts.add(v.trim());
-          }
-          add(pm.street); add(pm.subLocality); add(pm.locality);
-          add(pm.subAdministrativeArea); add(pm.administrativeArea); add(pm.postalCode);
-          if (mounted) setState(() => _addressCtrl.text = parts.join(', '));
-        }
-      } catch (_) {
-        // Fallback terakhir: koordinat mentah
-        if (mounted) {
-          setState(() => _addressCtrl.text =
-              'Lat: ${latLng.latitude.toStringAsFixed(6)}, '
-              'Lng: ${latLng.longitude.toStringAsFixed(6)}');
-        }
+      // Fallback: koordinat mentah
+      if (mounted) {
+        setState(() => _addressCtrl.text =
+            'Lat: ${latLng.latitude.toStringAsFixed(6)}, '
+            'Lng: ${latLng.longitude.toStringAsFixed(6)}');
       }
     } finally {
       if (mounted) setState(() => _geocoding = false);
@@ -1509,7 +1962,7 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     } else {
       label   = 'Konfirmasi & Pesan Sekarang';
       enabled = true;
-      onTap   = () { Navigator.pop(context); widget.onConfirm(_method!); };
+      onTap   = () { Navigator.pop(context); widget.onConfirm(_method!, _nameCtrl.text.trim(), _addressCtrl.text.trim()); };
     }
 
     return Container(
@@ -1566,6 +2019,414 @@ class _QRPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
+// ============================================================
+// ORDER DETAIL SHEET
+// ============================================================
+class _OrderDetailSheet extends StatefulWidget {
+  final OrderHistoryItem order;
+  final CurrencyService currency;
+  final String selCur;
+  final void Function(OrderStatus) onStatusChange;
+
+  const _OrderDetailSheet({
+    required this.order, required this.currency,
+    required this.selCur, required this.onStatusChange,
+  });
+
+  @override
+  State<_OrderDetailSheet> createState() => _OrderDetailSheetState();
+}
+
+class _OrderDetailSheetState extends State<_OrderDetailSheet> {
+  late OrderStatus _status;
+
+  @override
+  void initState() {
+    super.initState();
+    _status = widget.order.status;
+  }
+
+  // Timeline steps
+  static const _timeline = [
+    OrderStatus.pending,
+    OrderStatus.packed,
+    OrderStatus.shipped,
+    OrderStatus.delivered,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final o = widget.order;
+    return DraggableScrollableSheet(
+      initialChildSize: .85, maxChildSize: .95, minChildSize: .5, expand: false,
+      builder: (_, sc) => Container(
+        decoration: const BoxDecoration(color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+        child: Column(children: [
+          const SizedBox(height: 10),
+          Container(width:36, height:4, decoration: BoxDecoration(
+              color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 12),
+          // Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Pesanan #${o.orderId}', style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                Text(DateFormat('dd MMM yyyy, HH:mm').format(o.orderDate),
+                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              ]),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: _status.color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_status.icon, size: 13, color: _status.color),
+                  const SizedBox(width: 5),
+                  Text(_status.label, style: TextStyle(fontSize: 11,
+                      fontWeight: FontWeight.w700, color: _status.color)),
+                ]),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: AppColors.border, height: 1),
+          Expanded(child: SingleChildScrollView(
+            controller: sc,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+              // ── Timeline ──────────────────────────────────
+              const Text('Status Pesanan', style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 12),
+              Row(children: List.generate(_timeline.length * 2 - 1, (i) {
+                if (i.isOdd) {
+                  final passed = _timeline[i ~/ 2].index <= _status.index;
+                  return Expanded(child: Container(height: 2,
+                    color: passed ? AppColors.primary : AppColors.border));
+                }
+                final s = _timeline[i ~/ 2];
+                final done = s.index <= _status.index;
+                return Column(children: [
+                  Container(width: 28, height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: done ? AppColors.primary : AppColors.softCard,
+                      border: Border.all(color: done ? AppColors.primary : AppColors.border, width: 1.5)),
+                    child: Icon(done ? Icons.check : s.icon,
+                        color: done ? Colors.white : AppColors.textSecondary, size: 13)),
+                  const SizedBox(height: 4),
+                  Text(s.label, style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600,
+                      color: done ? AppColors.primary : AppColors.textSecondary)),
+                ]);
+              })),
+              const SizedBox(height: 16),
+
+              // ── Update Status (simulasi) ───────────────────
+              if (_status != OrderStatus.delivered && _status != OrderStatus.cancelled)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: AppColors.softCard,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.border)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Simulasi Update Status', style: TextStyle(
+                        fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8,
+                      children: OrderStatus.values
+                          .where((s) => s != OrderStatus.cancelled && s != _status)
+                          .map((s) => GestureDetector(
+                            onTap: () {
+                              setState(() => _status = s);
+                              widget.order.status = s;
+                              widget.onStatusChange(s);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: s.color.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: s.color.withOpacity(0.4))),
+                              child: Text(s.label, style: TextStyle(
+                                  fontSize: 11, fontWeight: FontWeight.w600, color: s.color))),
+                          )).toList()),
+                  ]),
+                ),
+              const SizedBox(height: 16),
+
+              // ── Info pengiriman ────────────────────────────
+              _section('Informasi Pengiriman', [
+                _infoRow('Penerima', o.recipientName),
+                _infoRow('Alamat',   o.deliveryAddress),
+                _infoRow('Metode Bayar', o.paymentMethod),
+              ]),
+              const SizedBox(height: 16),
+
+              // ── Daftar produk ──────────────────────────────
+              const Text('Produk Dipesan', style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              ...o.productNames.map((name) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(children: [
+                  const Icon(Icons.circle, size: 6, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(name, style: const TextStyle(
+                      fontSize: 12, color: AppColors.textPrimary))),
+                ]),
+              )),
+              const Divider(color: AppColors.border, height: 24),
+
+              // ── Total ──────────────────────────────────────
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text('${o.totalItems} item', style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary)),
+                Text(widget.currency.format(o.totalPrice, widget.selCur),
+                    style: const TextStyle(fontSize: 16,
+                        fontWeight: FontWeight.w800, color: AppColors.primary)),
+              ]),
+              const SizedBox(height: 20),
+
+              // ── Batalkan pesanan ───────────────────────────
+              if (_status != OrderStatus.delivered && _status != OrderStatus.cancelled)
+                SizedBox(width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      setState(() => _status = OrderStatus.cancelled);
+                      widget.order.status = OrderStatus.cancelled;
+                      widget.onStatusChange(OrderStatus.cancelled);
+                      Navigator.pop(context);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      side: const BorderSide(color: AppColors.error),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Batalkan Pesanan', style: TextStyle(fontWeight: FontWeight.w700)),
+                  )),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _section(String title, List<Widget> rows) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: const TextStyle(fontSize:13, fontWeight:FontWeight.w700, color:AppColors.textPrimary)),
+      const SizedBox(height:8),
+      Container(padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: AppColors.softCard,
+          borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.border)),
+        child: Column(children: rows)),
+    ],
+  );
+
+  Widget _infoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom:6),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width:100, child: Text(label,
+          style: const TextStyle(fontSize:11, color:AppColors.textSecondary))),
+      Expanded(child: Text(value,
+          style: const TextStyle(fontSize:11, fontWeight:FontWeight.w600, color:AppColors.textPrimary))),
+    ]),
+  );
+}
+
+// ============================================================
+// STRUK PEMBELIAN
+// ============================================================
+class _ReceiptSheet extends StatelessWidget {
+  final String orderId;
+  final List<CartItem> items;
+  final double totalPrice;
+  final PaymentMethod method;
+  final CurrencyService currency;
+  final String selCur;
+  final String buyerName;
+  final String address;
+
+  const _ReceiptSheet({
+    required this.orderId, required this.items,
+    required this.totalPrice, required this.method,
+    required this.currency, required this.selCur,
+    required this.buyerName, required this.address,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final dateStr = DateFormat('dd MMM yyyy, HH:mm').format(now);
+
+    return DraggableScrollableSheet(
+      initialChildSize: .85, maxChildSize: .95, minChildSize: .5, expand: false,
+      builder: (_, sc) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: Column(children: [
+          // ── Handle ───────────────────────────────────────
+          const SizedBox(height: 10),
+          Container(width:36, height:4, decoration: BoxDecoration(
+              color: AppColors.border, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 14),
+
+          // ── Header struk ─────────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryLight]),
+            ),
+            child: Column(children: [
+              Container(
+                width: 56, height: 56,
+                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                child: const Icon(Icons.check_rounded, color: AppColors.primary, size: 32),
+              ),
+              const SizedBox(height: 10),
+              const Text('Pesanan Berhasil!', style: TextStyle(
+                  color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('Order #$orderId', style: TextStyle(
+                  color: Colors.white.withOpacity(0.8), fontSize: 12)),
+              const SizedBox(height: 2),
+              Text(dateStr, style: TextStyle(
+                  color: Colors.white.withOpacity(0.7), fontSize: 11)),
+            ]),
+          ),
+
+          // ── Body struk ───────────────────────────────────
+          Expanded(child: SingleChildScrollView(
+            controller: sc,
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+              // Info pembeli
+              _section('Informasi Pengiriman', [
+                _infoRow('Nama',    buyerName),
+                _infoRow('Alamat',  address),
+                _infoRow('Metode Bayar', '${method.icon}  ${method.label}'),
+              ]),
+              const SizedBox(height: 16),
+
+              // Daftar item
+              const Text('Detail Pesanan', style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              ...items.map((item) => Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(children: [
+                  Text(item.product.emoji, style: const TextStyle(fontSize: 22)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(item.product.name, style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Text('${item.quantity}x  ${currency.format(item.product.finalPrice, selCur)}',
+                        style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  ])),
+                  Text(currency.format(item.product.finalPrice * item.quantity, selCur),
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                ]),
+              )),
+
+              const Divider(color: AppColors.border, height: 24),
+
+              // Total
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                const Text('Total Pembayaran', style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text(currency.format(totalPrice, selCur), style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.primary)),
+              ]),
+
+              const SizedBox(height: 20),
+
+              // Estimasi pengiriman
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.softCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.local_shipping_outlined, color: AppColors.primary, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Estimasi Tiba', style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    Text(
+                      DateFormat('dd MMM yyyy').format(now.add(
+                        method == PaymentMethod.cod
+                            ? const Duration(days: 1)
+                            : const Duration(days: 3),
+                      )),
+                      style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
+                    ),
+                  ])),
+                  Text(method == PaymentMethod.cod ? 'Same-day' : '2-3 hari',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                ]),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Tombol tutup
+              SizedBox(width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Selesai', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                )),
+            ]),
+          )),
+        ]),
+      ),
+    );
+  }
+
+  Widget _section(String title, List<Widget> rows) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(title, style: const TextStyle(fontSize:13, fontWeight:FontWeight.w700, color:AppColors.textPrimary)),
+      const SizedBox(height: 8),
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.softCard,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(children: rows),
+      ),
+    ],
+  );
+
+  Widget _infoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width: 100, child: Text(label,
+          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))),
+      Expanded(child: Text(value,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+    ]),
+  );
 }
 
 // ============================================================
