@@ -14,10 +14,33 @@ class WorkoutDetailPage extends StatelessWidget {
 
   final WorkoutProgram program;
 
-  Future<void> _openTutorial(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+  Future<void> _openTutorial(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url);
+
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link tutorial tidak valid')),
+      );
+      return;
+    }
+
+    try {
+      final success = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!success && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak bisa membuka tutorial')),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal membuka YouTube/browser')),
+      );
     }
   }
 
@@ -26,7 +49,9 @@ class WorkoutDetailPage extends StatelessWidget {
     final workoutController = context.read<WorkoutController>();
 
     return Scaffold(
-      appBar: AppBar(title: Text(program.title)),
+      appBar: AppBar(
+        title: Text(program.title),
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
@@ -70,6 +95,7 @@ class WorkoutDetailPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+
           Card(
             child: Padding(
               padding: const EdgeInsets.all(18),
@@ -77,21 +103,33 @@ class WorkoutDetailPage extends StatelessWidget {
                 children: [
                   _infoRow('Target Area', program.targetArea),
                   _infoRow('Difficulty', program.difficulty),
-                  _infoRow('Estimated Duration', '${program.estimatedMinutes} menit'),
-                  _infoRow('Total Exercise', '${program.exercises.length}'),
+                  _infoRow(
+                    'Estimated Duration',
+                    '${program.estimatedMinutes} menit',
+                  ),
+                  _infoRow(
+                    'Total Exercise',
+                    '${program.exercises.length}',
+                  ),
                 ],
               ),
             ),
           ),
+
           const SizedBox(height: 18),
           const Text(
             'Daftar Exercise',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 12),
+
           ...program.exercises.asMap().entries.map((entry) {
             final index = entry.key;
             final exercise = entry.value;
+
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Card(
@@ -119,6 +157,7 @@ class WorkoutDetailPage extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 12),
+
                       Text(
                         exercise.description,
                         style: const TextStyle(
@@ -126,18 +165,29 @@ class WorkoutDetailPage extends StatelessWidget {
                           height: 1.35,
                         ),
                       ),
+
                       const SizedBox(height: 12),
+
                       _miniInfo(
                         exercise.isTimed ? 'Durasi' : 'Reps',
-                        exercise.isTimed ? '${exercise.reps} detik' : '${exercise.reps} reps',
+                        exercise.isTimed
+                            ? '${exercise.reps} detik'
+                            : '${exercise.reps} reps',
                       ),
                       _miniInfo('Set', '${exercise.sets}'),
                       _miniInfo('Rest', '${exercise.restSeconds} detik'),
+
                       const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: () => _openTutorial(exercise.youtubeUrl),
-                        icon: const Icon(Icons.play_circle_outline),
-                        label: const Text('Lihat Tutorial'),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            _openTutorial(context, exercise.youtubeUrl);
+                          },
+                          icon: const Icon(Icons.play_circle_outline),
+                          label: const Text('Lihat Tutorial'),
+                        ),
                       ),
                     ],
                   ),
@@ -145,16 +195,24 @@ class WorkoutDetailPage extends StatelessWidget {
               ),
             );
           }),
+
           const SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: () {
-              workoutController.startWorkout(program);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const WorkoutSessionPage()),
-              );
-            },
-            child: const Text('Mulai Workout'),
+
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: () {
+                workoutController.startWorkout(program);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const WorkoutSessionPage(),
+                  ),
+                );
+              },
+              child: const Text('Mulai Workout'),
+            ),
           ),
         ],
       ),
@@ -183,8 +241,14 @@ class WorkoutDetailPage extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title, style: const TextStyle(color: AppColors.textSecondary)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(
+            title,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
         ],
       ),
     );

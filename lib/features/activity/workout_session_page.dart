@@ -13,13 +13,38 @@ class WorkoutSessionPage extends StatelessWidget {
   String _formatTime(int totalSeconds) {
     final min = totalSeconds ~/ 60;
     final sec = totalSeconds % 60;
-    return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+
+    return '${min.toString().padLeft(2, '0')}:'
+        '${sec.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _openTutorial(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+  Future<void> _openTutorial(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url);
+
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Link tutorial tidak valid')),
+      );
+      return;
+    }
+
+    try {
+      final success = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!success && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak bisa membuka tutorial')),
+        );
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal membuka YouTube/browser')),
+      );
     }
   }
 
@@ -33,7 +58,9 @@ class WorkoutSessionPage extends StatelessWidget {
 
     if (program == null || exercise == null) {
       return const Scaffold(
-        body: Center(child: Text('Workout tidak aktif')),
+        body: Center(
+          child: Text('Workout tidak aktif'),
+        ),
       );
     }
 
@@ -83,7 +110,9 @@ class WorkoutSessionPage extends StatelessWidget {
               ],
             ),
           ),
+
           const SizedBox(height: 16),
+
           Card(
             child: Padding(
               padding: const EdgeInsets.all(18),
@@ -115,7 +144,9 @@ class WorkoutSessionPage extends StatelessWidget {
                       ],
                     ),
                   ),
+
                   const SizedBox(height: 16),
+
                   Text(
                     exercise.description,
                     style: const TextStyle(
@@ -123,95 +154,172 @@ class WorkoutSessionPage extends StatelessWidget {
                       height: 1.4,
                     ),
                   ),
+
                   const SizedBox(height: 16),
-                  _infoRow('Set', '${workoutController.currentSet}/${exercise.sets}'),
+
+                  _infoRow(
+                    'Set',
+                    '${workoutController.currentSet}/${exercise.sets}',
+                  ),
                   _infoRow(
                     exercise.isTimed ? 'Durasi Target' : 'Reps Target',
-                    exercise.isTimed ? '${exercise.reps} detik' : '${exercise.reps} reps',
+                    exercise.isTimed
+                        ? '${exercise.reps} detik'
+                        : '${exercise.reps} reps',
                   ),
-                  _infoRow('Rest', '${exercise.restSeconds} detik'),
+                  _infoRow(
+                    'Rest',
+                    '${exercise.restSeconds} detik',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        _openTutorial(context, exercise.youtubeUrl);
+                      },
+                      icon: const Icon(Icons.play_circle_outline),
+                      label: const Text('Lihat Tutorial'),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
+
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: () => _openTutorial(exercise.youtubeUrl),
-            icon: const Icon(Icons.play_circle_outline),
-            label: const Text('Lihat Tutorial'),
-          ),
-          const SizedBox(height: 12),
+
           Card(
-            color: workoutController.isResting ? AppColors.softAccent : AppColors.softCard,
             child: Padding(
               padding: const EdgeInsets.all(18),
               child: Column(
                 children: [
-                  Text(
-                    workoutController.isResting ? 'Rest Time' : 'Workout Time',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
+                  const Text(
+                    'Waktu Latihan',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
                       fontSize: 16,
                     ),
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    workoutController.isResting
-                        ? '${workoutController.restRemaining}s'
-                        : _formatTime(workoutController.elapsedSeconds),
+                    _formatTime(workoutController.elapsedSeconds),
                     style: const TextStyle(
-                      fontSize: 34,
+                      fontSize: 36,
                       fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
+                      color: AppColors.primary,
                     ),
                   ),
+                  if (workoutController.isResting) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      'Rest: ${workoutController.restRemaining} detik',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
+
           const SizedBox(height: 16),
-          if (!workoutController.isResting)
-            ElevatedButton(
-              onPressed: workoutController.finishCurrentSet,
-              child: Text(exercise.isTimed ? 'Set Selesai' : 'Tandai Set Selesai'),
-            ),
+
           if (workoutController.isResting)
-            ElevatedButton(
-              onPressed: workoutController.skipRest,
-              child: const Text('Lewati Rest'),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: workoutController.skipRest,
+                icon: const Icon(Icons.skip_next_rounded),
+                label: const Text('Lewati Rest'),
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: workoutController.finishCurrentSet,
+                icon: const Icon(Icons.check_rounded),
+                label: const Text('Selesai Set Ini'),
+              ),
             ),
-          const SizedBox(height: 12),
-          OutlinedButton(
-            onPressed: workoutController.pauseWorkout,
-            child: Text(
-              workoutController.isPaused ? 'Lanjutkan Workout' : 'Pause Manual',
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              onPressed: workoutController.pauseWorkout,
+              icon: Icon(
+                workoutController.isPaused
+                    ? Icons.play_arrow_rounded
+                    : Icons.pause_rounded,
+              ),
+              label: Text(
+                workoutController.isPaused ? 'Lanjutkan' : 'Pause',
+              ),
             ),
           ),
-          const SizedBox(height: 12),
-          if (!workoutController.isWorkoutActive)
-            ElevatedButton(
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
               onPressed: () async {
-                if (authController.userEmail == null) return;
-                final success = await workoutController.completeWorkout(
-                  authController.userEmail!,
-                );
+                final email = authController.userEmail;
+
+                if (email == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('User belum login'),
+                    ),
+                  );
+                  return;
+                }
+
+                final success = await workoutController.completeWorkout(email);
+
                 if (!context.mounted) return;
+
                 if (success) {
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(builder: (_) => const WorkoutResultPage()),
+                    MaterialPageRoute(
+                      builder: (_) => const WorkoutResultPage(),
+                    ),
                   );
                 }
               },
-              child: const Text('Lihat Hasil Workout'),
+              icon: const Icon(Icons.flag_rounded),
+              label: const Text('Selesaikan Workout'),
             ),
-          const SizedBox(height: 8),
+          ),
+
+          const SizedBox(height: 10),
+
           TextButton(
             onPressed: () {
               workoutController.cancelWorkout();
               Navigator.pop(context);
             },
-            child: const Text('Batalkan Workout'),
+            child: const Text(
+              'Batalkan Workout',
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
