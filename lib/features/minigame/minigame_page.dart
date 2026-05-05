@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../auth/controllers/auth_controller.dart';
@@ -20,6 +23,13 @@ class _MinigamePageState extends State<MinigamePage>
   late Animation<double> _shakeAnimation;
   double _swipeStartX = 0;
 
+  // ── Gyroscope ──
+StreamSubscription<GyroscopeEvent>? _gyroSub;
+bool _useGyro = false;
+DateTime _lastGyroMove = DateTime.now();
+static const _gyroCooldown = Duration(milliseconds: 400);
+static const _gyroThreshold = 0.8; 
+
   @override
   void initState() {
     super.initState();
@@ -30,6 +40,38 @@ class _MinigamePageState extends State<MinigamePage>
     _shakeAnimation = Tween<double>(begin: 0, end: 8).animate(
       CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn),
     );
+    _initGyroscope();
+  }
+
+  void _initGyroscope() {
+    try {
+      _gyroSub = gyroscopeEventStream(
+        samplingPeriod: SensorInterval.gameInterval, // sampling lebih cepat
+      ).listen((GyroscopeEvent event) {
+        if (!mounted) return;           // fix: cek mounted dulu
+        if (!_useGyro) return;
+
+        final game = context.read<MinigameController>();
+        if (!game.isPlaying) return;
+
+        final now = DateTime.now();
+        if (now.difference(_lastGyroMove) < _gyroCooldown) return;
+
+        // PERBAIKAN UTAMA: gunakan event.z untuk tilt kiri/kanan portrait mode
+        // event.z > 0 = miring kanan, event.z < 0 = miring kiri
+        if (event.z > _gyroThreshold) {
+          game.moveLeft();             // z positif = miring kanan = gerak kiri
+          _lastGyroMove = now;
+          HapticFeedback.selectionClick();
+        } else if (event.z < -_gyroThreshold) {
+          game.moveRight();            // z negatif = miring kiri = gerak kanan
+          _lastGyroMove = now;
+          HapticFeedback.selectionClick();
+        }
+      });
+    } catch (e) {
+      debugPrint('Gyroscope tidak tersedia: $e');
+    }
   }
 
   @override
@@ -51,6 +93,7 @@ class _MinigamePageState extends State<MinigamePage>
 
   @override
   void dispose() {
+    _gyroSub?.cancel();
     _shakeController.dispose();
     super.dispose();
   }
@@ -65,7 +108,6 @@ class _MinigamePageState extends State<MinigamePage>
     final gameController = context.watch<MinigameController>();
     final authController = context.watch<AuthController>();
 
-    // Trigger shake saat kena hit
     if (gameController.justHit) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _triggerShake());
     }
@@ -100,14 +142,89 @@ class _MinigamePageState extends State<MinigamePage>
             ),
           ),
 
+          // ── Gyro toggle ──
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: _useGyro
+                  ? AppColors.primary.withOpacity(0.1)
+                  : AppColors.softCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _useGyro ? AppColors.primary : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.screen_rotation_rounded,
+                  color: _useGyro ? AppColors.primary : AppColors.textSecondary,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _useGyro
+                            ? 'Kontrol Gyroscope Aktif'
+                            : 'Gyroscope Nonaktif',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _useGyro
+                              ? AppColors.primary
+                              : AppColors.textPrimary,
+                          fontSize: 13,
+                        ),
+                      ),
+                      Text(
+                        _useGyro
+                            ? 'Miringkan HP kiri/kanan untuk bergerak'
+                            : 'Gunakan tombol atau swipe untuk bergerak',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _useGyro,
+                  activeColor: AppColors.primary,
+                  onChanged: (val) {
+                    setState(() => _useGyro = val);
+                    HapticFeedback.lightImpact();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          val
+                              ? '🎮 Gyroscope aktif — miringkan HP!'
+                              : '👆 Kembali ke kontrol tombol/swipe',
+                        ),
+                        duration: const Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
           // ── Combo indicator ──
           if (gameController.comboMultiplier > 1)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Center(
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.orange.shade100,
                     borderRadius: BorderRadius.circular(20),
@@ -144,6 +261,7 @@ class _MinigamePageState extends State<MinigamePage>
                 _swipeStartX = details.globalPosition.dx;
               },
               onHorizontalDragEnd: (details) {
+                if (_useGyro) return; // gyro mode → abaikan swipe
                 final diff = details.globalPosition.dx - _swipeStartX;
                 if (diff < -30) {
                   gameController.moveLeft();
@@ -188,6 +306,37 @@ class _MinigamePageState extends State<MinigamePage>
                             );
                           }),
                         ),
+
+                        // Gyro indicator di dalam arena
+                        if (_useGyro && gameController.isPlaying)
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.screen_rotation_rounded,
+                                      size: 12, color: AppColors.primary),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'GYRO',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
 
                         // Falling items
                         ...gameController.items.map((item) {
@@ -251,15 +400,50 @@ class _MinigamePageState extends State<MinigamePage>
                                 borderRadius: BorderRadius.circular(28),
                               ),
                               child: Center(
-                                child: Text(
-                                  gameController.countdownValue > 0
-                                      ? '${gameController.countdownValue}'
-                                      : 'GO!',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 80,
-                                    fontWeight: FontWeight.w900,
-                                  ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      gameController.countdownValue > 0
+                                          ? '${gameController.countdownValue}'
+                                          : 'GO!',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 80,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    if (_useGyro) ...[
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 16, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.2),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                                Icons.screen_rotation_rounded,
+                                                color: Colors.white,
+                                                size: 16),
+                                            SizedBox(width: 6),
+                                            Text(
+                                              'Miringkan HP untuk bergerak!',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ),
@@ -288,11 +472,9 @@ class _MinigamePageState extends State<MinigamePage>
                                             color: Colors.amber,
                                           ),
                                         ),
-                                      Text(
-                                        gameController.isNewHighScore
-                                            ? 'GAME OVER'
-                                            : 'GAME OVER',
-                                        style: const TextStyle(
+                                      const Text(
+                                        'GAME OVER',
+                                        style: TextStyle(
                                           fontSize: 26,
                                           fontWeight: FontWeight.w900,
                                           color: Colors.white,
@@ -310,7 +492,8 @@ class _MinigamePageState extends State<MinigamePage>
                                       const SizedBox(height: 12),
                                     ],
                                     ElevatedButton(
-                                      onPressed: () => gameController.startGame(
+                                      onPressed: () =>
+                                          gameController.startGame(
                                         userEmail: authController.userEmail,
                                         playerName: playerName,
                                       ),
@@ -318,6 +501,16 @@ class _MinigamePageState extends State<MinigamePage>
                                           ? 'Main Lagi'
                                           : 'Start Game'),
                                     ),
+                                    if (_useGyro) ...[
+                                      const SizedBox(height: 8),
+                                      const Text(
+                                        '🎮 Mode Gyroscope Aktif',
+                                        style: TextStyle(
+                                          color: Colors.white70,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -333,29 +526,53 @@ class _MinigamePageState extends State<MinigamePage>
 
           const SizedBox(height: 16),
 
-          // ── Controls ──
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed:
-                      gameController.isPlaying ? gameController.moveLeft : null,
-                  icon: const Icon(Icons.arrow_left),
-                  label: const Text('Kiri'),
+          // ── Controls (hanya tampil saat gyro nonaktif) ──
+          if (!_useGyro)
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: gameController.isPlaying
+                        ? gameController.moveLeft
+                        : null,
+                    icon: const Icon(Icons.arrow_left),
+                    label: const Text('Kiri'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: gameController.isPlaying
-                      ? gameController.moveRight
-                      : null,
-                  icon: const Icon(Icons.arrow_right),
-                  label: const Text('Kanan'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: gameController.isPlaying
+                        ? gameController.moveRight
+                        : null,
+                    icon: const Icon(Icons.arrow_right),
+                    label: const Text('Kanan'),
+                  ),
                 ),
+              ],
+            ),
+
+          if (_useGyro && gameController.isPlaying)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.screen_rotation_rounded,
+                      color: AppColors.primary, size: 18),
+                  SizedBox(width: 8),
+                  Text(
+                    'Miringkan HP kiri / kanan untuk bergerak',
+                    style: TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
 
           const SizedBox(height: 12),
 
@@ -375,7 +592,8 @@ class _MinigamePageState extends State<MinigamePage>
                   Text(
                     'Ambil item sehat untuk tambah score. Combo berturut-turut melipatgandakan poin. '
                     'Hindari junk food. Bonus ❤️ menambah nyawa. '
-                    'Jika item sehat terlewat, nyawa berkurang. Game makin cepat seiring waktu!',
+                    'Jika item sehat terlewat, nyawa berkurang. Game makin cepat seiring waktu!\n\n'
+                    '🎮 Aktifkan Gyroscope untuk kontrol dengan memiringkan HP!',
                     textAlign: TextAlign.center,
                   ),
                 ],
@@ -542,7 +760,8 @@ class _MinigamePageState extends State<MinigamePage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        Text(label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12)),
         const SizedBox(height: 4),
         Text(
           value,
