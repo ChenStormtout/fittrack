@@ -20,9 +20,14 @@ import 'features/activity/controllers/workout_controller.dart';
 import 'features/auth/controllers/auth_controller.dart';
 import 'features/nutrition/controllers/nutrition_controller.dart';
 import 'features/minigame/controllers/minigame_controller.dart';
+import 'features/shop/shop_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await CurrencyService.instance.fetchRates();
+
+  
 
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
     sqfliteFfiInit();

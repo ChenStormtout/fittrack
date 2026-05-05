@@ -271,12 +271,52 @@ const List<ProductModel> allProducts = [
 // CURRENCY SERVICE
 // ============================================================
 
+// ============================================================
+// CURRENCY SERVICE — Singleton + Realtime API
+// ============================================================
 class CurrencyService {
-  static const _rates   = {'IDR': 1.0,    'USD': 0.000065, 'EUR': 0.000060, 'GBP': 0.000052};
-  static const _symbols = {'IDR': 'Rp',   'USD': '\$',     'EUR': '€',      'GBP': '£'};
+  CurrencyService._(); // private constructor
+  static final CurrencyService instance = CurrencyService._();
+
+  static const _symbols = {'IDR': 'Rp', 'USD': '\$', 'EUR': '€', 'GBP': '£'};
+
+  // fallback default rates
+  Map<String, double> _rates = {
+    'IDR': 1.0,
+    'USD': 0.000065,
+    'EUR': 0.000060,
+    'GBP': 0.000052
+  };
+
+  bool _ready = false;
+
+  /// Panggil ini saat init app / lazy load
+  Future<void> fetchRates() async {
+    try {
+      // Gunakan URL ini (Gratis & Tanpa Key untuk open data)
+      final url = Uri.parse('https://open.er-api.com/v6/latest/IDR');
+      
+      final resp = await http.get(url).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final rates = data['rates'] as Map<String, dynamic>;
+        
+        _rates = {
+          'IDR': 1.0,
+          'USD': (rates['USD'] as num).toDouble(),
+          'EUR': (rates['EUR'] as num).toDouble(),
+          'GBP': (rates['GBP'] as num).toDouble(),
+        };
+        _ready = true;
+      }
+    } catch (e) {
+      debugPrint("Gagal mengambil kurs: $e");
+      _ready = false;
+    }
+  }
 
   String format(double priceIdr, String cur) {
-    final v   = priceIdr * (_rates[cur] ?? 1.0);
+    final v = priceIdr * (_rates[cur] ?? 1.0);
     final sym = _symbols[cur] ?? 'Rp';
     return cur == 'IDR' ? '$sym ${_fmt(v.round())}' : '$sym ${v.toStringAsFixed(2)}';
   }
@@ -483,7 +523,7 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   // ── State ──────────────────────────────────────────────────
   final List<CartItem> _cart = [];
   final _searchCtrl = TextEditingController();
-  final _currency   = CurrencyService();
+  final _currency = CurrencyService.instance;
 
   // Overlay notifikasi popup
   OverlayEntry? _overlayEntry;
