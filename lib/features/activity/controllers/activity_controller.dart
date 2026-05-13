@@ -36,11 +36,18 @@ class ActivityResult {
 }
 
 class ActivityController extends ChangeNotifier {
-  ActivityController({
-    required ActivityRepository activityRepository,
-  }) : _activityRepository = activityRepository;
+  ActivityController({required ActivityRepository activityRepository})
+      : _activityRepository = activityRepository;
 
   final ActivityRepository _activityRepository;
+
+  // ── Max speed filter (m/s) per activity type ──────────────────
+  static const _maxSpeedMs = {
+    'Walking': 3.5,   // ~12.6 km/h
+    'Running': 12.0,  // ~43 km/h
+    'Cycling': 20.0,  // ~72 km/h
+  };
+  static const _minAccuracyM = 25.0; // buang titik akurasi > 25m
 
   bool _isTracking = false;
   bool _isPaused = false;
@@ -66,6 +73,9 @@ class ActivityController extends ChangeNotifier {
   List<ActivityModel> _history = [];
   ActivityResult? _lastResult;
 
+  // Stats untuk debug/info
+  int _filteredPoints = 0;
+
   bool get isTracking => _isTracking;
   bool get isPaused => _isPaused;
   bool get isLoadingHistory => _isLoadingHistory;
@@ -78,8 +88,8 @@ class ActivityController extends ChangeNotifier {
   List<ActivityModel> get history => _history;
   List<LatLng> get routeLatLngs => List.unmodifiable(_routeLatLngs);
   ActivityResult? get lastResult => _lastResult;
+  int get filteredPoints => _filteredPoints;
 
-  /// Pace dalam menit per km
   double get paceMinPerKm {
     if (_distanceKm < 0.01) return 0;
     return (_durationSeconds / 60.0) / _distanceKm;
@@ -98,6 +108,84 @@ class ActivityController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── GPS Filter: tolak titik tidak valid ───────────────────────
+  bool _isValidPoint(Position pos) {
+    // 1. Filter akurasi buruk
+    if (pos.accuracy > _minAccuracyM) {
+      _filteredPoints++;
+      return false;
+    }
+
+    // 2. Filter speed tidak wajar (jika ada titik sebelumnya)
+    if (_lastPosition != null) {
+      final meters = Geolocator.distanceBetween(
+        _lastPosition!.latitude, _lastPosition!.longitude,
+        pos.latitude, pos.longitude,
+      );
+      final timeDiff = pos.timestamp.difference(_lastPosition!.timestamp).inMilliseconds / 1000.0;
+
+      if (timeDiff > 0) {
+        final speedMs = meters / timeDiff;
+        final maxSpeed = _maxSpeedMs[_activityType] ?? 12.0;
+
+        if (speedMs > maxSpeed) {
+          _filteredPoints++;
+          return false;
+        }
+      }
+
+      // 3. Filter titik terlalu dekat (noise GPS diam)
+      if (meters < 2.0) {
+        return false; // tidak filter, tapi juga tidak tambah jarak
+      }
+    }
+
+    return true;
+  }
+
+  // ── Process valid GPS point ───────────────────────────────────
+  void _processPosition(Position position) {
+    if (!_isValidPoint(position)) return;
+
+    final point = {'lat': position.latitude, 'lng': position.longitude};
+    _routePoints.add(point);
+    _routeLatLngs.add(LatLng(position.latitude, position.longitude));
+
+    if (_lastPosition != null) {
+      final meters = Geolocator.distanceBetween(
+        _lastPosition!.latitude, _lastPosition!.longitude,
+        position.latitude, position.longitude,
+      );
+      // Hanya tambah jarak jika > 2m (filter noise GPS diam)
+      if (meters >= 2.0) {
+        _distanceKm += meters / 1000.0;
+      }
+    }
+
+    // Elevation tracking
+    final altitude = position.altitude;
+    if (_lastAltitude != null && altitude > _lastAltitude! + 0.5) {
+      _elevationGainM += altitude - _lastAltitude!;
+    }
+    _lastAltitude = altitude;
+    _maxElevationM = max(_maxElevationM, altitude);
+
+    _lastPosition = position;
+    _caloriesBurned = _estimateCalories(
+      activityType: _activityType,
+      durationSeconds: _durationSeconds,
+      distanceKm: _distanceKm,
+    );
+
+    notifyListeners();
+  }
+
+  // ── Location Settings ─────────────────────────────────────────
+  static const _locationSettings = LocationSettings(
+    accuracy: LocationAccuracy.bestForNavigation,
+    distanceFilter: 3, // update setiap 3 meter
+  );
+
   Future<bool> _requestPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) return false;
@@ -106,12 +194,10 @@ class ActivityController extends ChangeNotifier {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
       return false;
     }
-
     return true;
   }
 
@@ -130,63 +216,13 @@ class ActivityController extends ChangeNotifier {
     _elevationGainM = 0;
     _maxElevationM = 0;
     _lastAltitude = null;
+    _filteredPoints = 0;
     _routePoints.clear();
     _routeLatLngs.clear();
     _lastResult = null;
 
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _durationSeconds++;
-      _caloriesBurned = _estimateCalories(
-        activityType: _activityType,
-        durationSeconds: _durationSeconds,
-        distanceKm: _distanceKm,
-      );
-      notifyListeners();
-    });
-
-    _positionSubscription?.cancel();
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      ),
-    ).listen((position) {
-      final currentPoint = {
-        'lat': position.latitude,
-        'lng': position.longitude,
-      };
-      _routePoints.add(currentPoint);
-      _routeLatLngs.add(LatLng(position.latitude, position.longitude));
-
-      if (_lastPosition != null) {
-        final meters = Geolocator.distanceBetween(
-          _lastPosition!.latitude,
-          _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        _distanceKm += meters / 1000.0;
-      }
-
-      // Track elevation gain
-      final altitude = position.altitude;
-      if (_lastAltitude != null && altitude > _lastAltitude!) {
-        _elevationGainM += altitude - _lastAltitude!;
-      }
-      _lastAltitude = altitude;
-      _maxElevationM = max(_maxElevationM, altitude);
-
-      _lastPosition = position;
-      _caloriesBurned = _estimateCalories(
-        activityType: _activityType,
-        durationSeconds: _durationSeconds,
-        distanceKm: _distanceKm,
-      );
-
-      notifyListeners();
-    });
-
+    _startTimer();
+    _startPositionStream();
     notifyListeners();
     return true;
   }
@@ -204,6 +240,15 @@ class ActivityController extends ChangeNotifier {
     if (!_isTracking || !_isPaused) return;
     _isPaused = false;
 
+    // FIX: reset lastPosition agar tidak "lompat" jarak saat resume
+    _lastPosition = null;
+
+    _startTimer();
+    _startPositionStream();
+    notifyListeners();
+  }
+
+  void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _durationSeconds++;
@@ -214,62 +259,23 @@ class ActivityController extends ChangeNotifier {
       );
       notifyListeners();
     });
+  }
 
+  void _startPositionStream() {
     _positionSubscription?.cancel();
     _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      ),
-    ).listen((position) {
-      final currentPoint = {
-        'lat': position.latitude,
-        'lng': position.longitude,
-      };
-      _routePoints.add(currentPoint);
-      _routeLatLngs.add(LatLng(position.latitude, position.longitude));
-
-      if (_lastPosition != null) {
-        final meters = Geolocator.distanceBetween(
-          _lastPosition!.latitude,
-          _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        _distanceKm += meters / 1000.0;
-      }
-
-      final altitude = position.altitude;
-      if (_lastAltitude != null && altitude > _lastAltitude!) {
-        _elevationGainM += altitude - _lastAltitude!;
-      }
-      _lastAltitude = altitude;
-      _maxElevationM = max(_maxElevationM, altitude);
-
-      _lastPosition = position;
-      _caloriesBurned = _estimateCalories(
-        activityType: _activityType,
-        durationSeconds: _durationSeconds,
-        distanceKm: _distanceKm,
-      );
-
-      notifyListeners();
-    });
-
-    notifyListeners();
+      locationSettings: _locationSettings,
+    ).listen(_processPosition);
   }
 
   Future<bool> stopTracking(String userEmail) async {
     if (!_isTracking || _startTime == null) return false;
 
     _endTime = DateTime.now();
-
     _timer?.cancel();
     await _positionSubscription?.cancel();
-
     _isTracking = false;
 
-    // Simpan hasil untuk result screen
     _lastResult = ActivityResult(
       activityType: _activityType,
       distanceKm: _distanceKm,
@@ -310,9 +316,7 @@ class ActivityController extends ChangeNotifier {
   Future<void> loadHistory(String userEmail) async {
     _isLoadingHistory = true;
     notifyListeners();
-
     _history = await _activityRepository.getActivitiesByUser(userEmail);
-
     _isLoadingHistory = false;
     notifyListeners();
   }
@@ -323,15 +327,11 @@ class ActivityController extends ChangeNotifier {
     required double distanceKm,
   }) {
     final minutes = durationSeconds / 60.0;
-
     switch (activityType) {
-      case 'Running':
-        return minutes * 10.0;
-      case 'Cycling':
-        return minutes * 8.0;
+      case 'Running': return minutes * 10.0;
+      case 'Cycling': return minutes * 8.0;
       case 'Walking':
-      default:
-        return minutes * 4.5;
+      default:        return minutes * 4.5;
     }
   }
 
