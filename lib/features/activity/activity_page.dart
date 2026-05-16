@@ -69,10 +69,7 @@ class _ActivityPageState extends State<ActivityPage> {
     final workoutCtrl = context.watch<WorkoutController>();
     final programs = workoutCtrl.getWorkoutPrograms();
 
-    final merged = _mergedHistory(
-      activityCtrl.history,
-      workoutCtrl.history,
-    );
+    final merged = _mergedHistory(activityCtrl.history, workoutCtrl.history);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Aktivitas & Workout')),
@@ -89,7 +86,7 @@ class _ActivityPageState extends State<ActivityPage> {
               borderRadius: BorderRadius.circular(28),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.18),
+                  color: AppColors.primary.withValues(alpha: 0.18),
                   blurRadius: 22,
                   offset: const Offset(0, 12),
                 ),
@@ -101,9 +98,10 @@ class _ActivityPageState extends State<ActivityPage> {
                 Text(
                   'Outdoor Tracking',
                   style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800),
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 SizedBox(height: 6),
                 Text(
@@ -149,73 +147,83 @@ class _ActivityPageState extends State<ActivityPage> {
           const SizedBox(height: 24),
 
           // ── WORKOUT PROGRAMS ─────────────────────────────────────────────
-          const Text('Workout Programs',
-              style:
-                  TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            'Workout Programs',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 12),
-          ...programs.map((program) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: InkWell(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => WorkoutDetailPage(program: program),
-                    ),
-                  ),
-                  borderRadius: BorderRadius.circular(24),
-                  child: Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: AppColors.softCard,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                          child: const Icon(Icons.fitness_center,
-                              color: AppColors.primary),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(program.title,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 16)),
-                              const SizedBox(height: 4),
-                              Text(program.subtitle),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${program.category} • ${program.targetArea} • ${program.difficulty}',
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.chevron_right_rounded),
-                      ],
-                    ),
+          ...programs.map(
+            (program) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: InkWell(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => WorkoutDetailPage(program: program),
                   ),
                 ),
-              )),
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: AppColors.softCard,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Icon(
+                          Icons.fitness_center,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              program.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(program.subtitle),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${program.category} • ${program.targetArea} • ${program.difficulty}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
 
           const SizedBox(height: 24),
 
           // ── ACHIEVEMENT ──────────────────────────────────────────────────
-          const Text('Achievement',
-              style:
-                  TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            'Achievement',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 12),
           if (workoutCtrl.achievements.isEmpty)
             _emptyCard(Icons.emoji_events_outlined, 'Belum ada achievement')
@@ -224,8 +232,10 @@ class _ActivityPageState extends State<ActivityPage> {
               final date = DateTime.parse(item.createdAt);
               return Card(
                 child: ListTile(
-                  leading: const Icon(Icons.emoji_events,
-                      color: AppColors.primary),
+                  leading: const Icon(
+                    Icons.emoji_events,
+                    color: AppColors.primary,
+                  ),
                   title: Text(item.title),
                   subtitle: Text(
                     '${item.description}\n'
@@ -242,21 +252,24 @@ class _ActivityPageState extends State<ActivityPage> {
           Row(
             children: [
               const Expanded(
-                child: Text('Catatan Latihan',
-                    style: TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w800)),
+                child: Text(
+                  'Catatan Latihan',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
               ),
               if (merged.isNotEmpty)
                 Text(
                   '${merged.length} sesi',
                   style: const TextStyle(
-                      color: AppColors.textSecondary, fontSize: 13),
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: 4),
           const Text(
-            'Outdoor & gym — ketuk untuk melihat detail',
+            'Outdoor & gym - ketuk untuk melihat peta tracking dan analisis',
             style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 12),
@@ -271,12 +284,14 @@ class _ActivityPageState extends State<ActivityPage> {
           else if (merged.isEmpty)
             _emptyCard(Icons.history_toggle_off, 'Belum ada catatan latihan')
           else
-            ...merged.map((entry) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: entry.isOutdoor
-                      ? _OutdoorHistoryCard(activity: entry.outdoor!)
-                      : _GymHistoryCard(session: entry.gym!),
-                )),
+            ...merged.map(
+              (entry) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: entry.isOutdoor
+                    ? _OutdoorHistoryCard(activity: entry.outdoor!)
+                    : _GymHistoryCard(session: entry.gym!),
+              ),
+            ),
         ],
       ),
     );
@@ -306,16 +321,16 @@ class _HistoryEntry {
   final String createdAt;
 
   _HistoryEntry.outdoor(ActivityModel a)
-      : isOutdoor = true,
-        outdoor = a,
-        gym = null,
-        createdAt = a.createdAt;
+    : isOutdoor = true,
+      outdoor = a,
+      gym = null,
+      createdAt = a.createdAt;
 
   _HistoryEntry.gym(WorkoutSessionModel w)
-      : isOutdoor = false,
-        outdoor = null,
-        gym = w,
-        createdAt = w.createdAt;
+    : isOutdoor = false,
+      outdoor = null,
+      gym = w,
+      createdAt = w.createdAt;
 }
 
 // ── OUTDOOR HISTORY CARD ──────────────────────────────────────────────────────
@@ -328,6 +343,15 @@ class _OutdoorHistoryCard extends StatelessWidget {
     final m = (s % 3600) ~/ 60;
     if (h > 0) return '${h}j ${m}m';
     return '${m}m';
+  }
+
+  String _pace(int durationSeconds, double distanceKm) {
+    if (distanceKm <= 0.01 || durationSeconds <= 0) return '--:--';
+    final paceSeconds = (durationSeconds / distanceKm).round();
+    final min = paceSeconds ~/ 60;
+    final sec = paceSeconds % 60;
+    return '${min.toString().padLeft(2, '0')}:'
+        '${sec.toString().padLeft(2, '0')}';
   }
 
   Color _color(String type) {
@@ -356,6 +380,7 @@ class _OutdoorHistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _color(activity.activityType);
     final date = DateTime.parse(activity.createdAt);
+    final pace = _pace(activity.durationSeconds, activity.distanceKm);
 
     return Material(
       color: Colors.transparent,
@@ -370,9 +395,9 @@ class _OutdoorHistoryCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.06),
+            color: color.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withOpacity(0.2)),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
@@ -381,11 +406,14 @@ class _OutdoorHistoryCard extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Icon(_icon(activity.activityType),
-                    color: color, size: 24),
+                child: Icon(
+                  _icon(activity.activityType),
+                  color: color,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 14),
 
@@ -396,49 +424,61 @@ class _OutdoorHistoryCard extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(activity.activityType,
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 15,
-                                color: color)),
+                        Text(
+                          activity.activityType,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            color: color,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: color.withOpacity(0.12),
+                            color: color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text('Outdoor',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: color)),
+                          child: Text(
+                            'Outdoor',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${activity.distanceKm.toStringAsFixed(2)} km  •  '
-                      '${_dur(activity.durationSeconds)}  •  '
-                      '${activity.caloriesBurned.toStringAsFixed(0)} kcal',
+                      '${activity.distanceKm.toStringAsFixed(2)} km  -  '
+                      '${_dur(activity.durationSeconds)}  -  '
+                      '$pace /km',
                       style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondary),
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       DateFormat('dd MMM yyyy, HH:mm').format(date),
                       style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary),
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              Icon(Icons.chevron_right_rounded,
-                  color: color.withOpacity(0.5)),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: color.withValues(alpha: 0.5),
+              ),
             ],
           ),
         ),
@@ -477,9 +517,9 @@ class _GymHistoryCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.06),
+            color: color.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: color.withOpacity(0.2)),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
@@ -488,11 +528,10 @@ class _GymHistoryCard extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.fitness_center,
-                    color: color, size: 22),
+                child: const Icon(Icons.fitness_center, color: color, size: 22),
               ),
               const SizedBox(width: 14),
 
@@ -504,26 +543,34 @@ class _GymHistoryCard extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(session.programName,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                  color: color)),
+                          child: Text(
+                            session.programName,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              color: color,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: color.withOpacity(0.12),
+                            color: color.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text('Gym',
-                              style: const TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: color)),
+                          child: Text(
+                            'Gym',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: color,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -533,22 +580,26 @@ class _GymHistoryCard extends StatelessWidget {
                       '${_dur(session.durationSeconds)}  •  '
                       '${session.caloriesBurned.toStringAsFixed(0)} kcal',
                       style: const TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondary),
+                        fontSize: 13,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       DateFormat('dd MMM yyyy, HH:mm').format(date),
                       style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary),
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
               ),
 
-              Icon(Icons.chevron_right_rounded,
-                  color: color.withOpacity(0.5)),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: color.withValues(alpha: 0.5),
+              ),
             ],
           ),
         ),
@@ -578,9 +629,9 @@ class _ActivityCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: color.withOpacity(0.22)),
+          border: Border.all(color: color.withValues(alpha: 0.22)),
         ),
         child: Column(
           children: [
@@ -588,30 +639,35 @@ class _ActivityCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 26),
             ),
             const SizedBox(height: 10),
-            Text(label,
-                style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: color)),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: color,
+              ),
+            ),
             const SizedBox(height: 4),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: color,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text('Mulai',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700)),
+              child: const Text(
+                'Mulai',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         ),
