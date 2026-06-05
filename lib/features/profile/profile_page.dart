@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../auth/controllers/auth_controller.dart';
+import 'address_list_page.dart';
 import 'edit_profile_page.dart';
 import 'saran_kesan_page.dart';
 
@@ -366,7 +367,9 @@ class _ProfilePageState extends State<ProfilePage> {
             child: Column(
               children: [
                 _profileItem('Gender', gender),
+                const Divider(height: 1, color: AppColors.border),
                 _profileItem('Goal', goal),
+                const Divider(height: 1, color: AppColors.border),
                 _profileItem('Activity Level', activityLevel),
               ],
             ),
@@ -388,6 +391,20 @@ class _ProfilePageState extends State<ProfilePage> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => const EditProfilePage(),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                _ActionTile(
+                  icon: Icons.location_on_outlined,
+                  title: 'Daftar Alamat',
+                  subtitle: 'Kelola alamat pengiriman untuk checkout',
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AddressListPage(),
                       ),
                     );
                   },
@@ -488,21 +505,28 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _profileItem(String title, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 9),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
+          Expanded(
+            flex: 5,
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+              ),
             ),
           ),
-          const Spacer(),
-          Flexible(
+          const SizedBox(width: 14),
+          Expanded(
+            flex: 6,
             child: Text(
               value,
               textAlign: TextAlign.right,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontWeight: FontWeight.w800,
                 color: AppColors.textPrimary,

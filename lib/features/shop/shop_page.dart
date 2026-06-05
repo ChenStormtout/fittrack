@@ -8,7 +8,12 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../core/services/biometric_service.dart';
+import '../../data/models/address_model.dart';
+import '../auth/controllers/auth_controller.dart';
 
 // pubspec.yaml — pastikan ada:
 //   dependencies:
@@ -1257,13 +1262,22 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
       ],
     ));
 
-  void _openCheckout() => showModalBottomSheet(
-    context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-    builder: (_) => _CheckoutSheet(
-      totalPrice: _totalPrice, totalItems: _totalItems,
-      currency: _currency, selCur: _selCur,
-      cartItems: List.from(_cart),
-      onConfirm: (PaymentMethod method, String name, String address) async {
+  void _openCheckout() {
+    final auth = context.read<AuthController>();
+    final user = auth.currentUser;
+    final initialName = (user?.fullName?.trim().isNotEmpty ?? false)
+        ? user!.fullName!.trim()
+        : '';
+
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => _CheckoutSheet(
+        totalPrice: _totalPrice, totalItems: _totalItems,
+        currency: _currency, selCur: _selCur,
+        cartItems: List.from(_cart),
+        userEmail: auth.userEmail ?? 'guest',
+        initialName: initialName,
+        onConfirm: (PaymentMethod method, String name, String address) async {
         final snapItems   = List<CartItem>.from(_cart);
         final snapTotal   = _totalPrice;
         final snapItems_n = _totalItems;
@@ -1320,7 +1334,8 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
         });
       },
     ),
-  );
+    );
+  }
 
   // ── Popup overlay notifikasi (lebih keren dari SnackBar) ──
   void _showCartToast(ProductModel p, bool isNew) {
@@ -1544,12 +1559,17 @@ class _CheckoutSheet extends StatefulWidget {
   final CurrencyService currency;
   final String selCur;
   final List<CartItem> cartItems;
+  final String userEmail;
+  final String initialName;
   final void Function(PaymentMethod method, String name, String address) onConfirm;
 
   const _CheckoutSheet({
     required this.totalPrice, required this.totalItems,
     required this.currency,   required this.selCur,
-    required this.cartItems,  required this.onConfirm,
+    required this.cartItems,
+    required this.userEmail,
+    required this.initialName,
+    required this.onConfirm,
   });
 
   @override
@@ -1560,6 +1580,10 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
   PaymentMethod? _method;
   int  _step       = 0; // 0=Alamat  1=Pembayaran  2=Konfirmasi
   bool _gpsLoading = false;
+  bool _addressesLoading = true;
+  bool _authenticating = false;
+  List<AddressModel> _savedAddresses = [];
+  AddressModel? _selectedAddress;
 
   final _nameCtrl    = TextEditingController();
   final _phoneCtrl   = TextEditingController();
@@ -1571,12 +1595,71 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
   bool _mapReady   = false;
   bool _geocoding  = false; // loading reverse geocoding saat pin digeser
   final MapController _mapCtrl = MapController();
+  final BiometricService _biometricService = BiometricService();
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.text = widget.initialName;
+    _loadSavedAddresses();
+  }
 
   @override
   void dispose() {
     _nameCtrl.dispose(); _phoneCtrl.dispose();
     _addressCtrl.dispose(); _noteCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSavedAddresses() async {
+    final addresses = await AddressStore.instance.loadAddresses(widget.userEmail);
+    if (!mounted) return;
+    AddressModel? selected;
+    for (final address in addresses) {
+      if (address.isDefault) {
+        selected = address;
+        break;
+      }
+    }
+    selected ??= addresses.isNotEmpty ? addresses.first : null;
+    setState(() {
+      _savedAddresses = addresses;
+      _addressesLoading = false;
+    });
+    if (selected != null) _useSavedAddress(selected);
+  }
+
+  void _useSavedAddress(AddressModel address) {
+    _selectedAddress = address;
+    _nameCtrl.text = address.recipientName;
+    _phoneCtrl.text = address.phone;
+    _addressCtrl.text = address.fullAddress;
+    _noteCtrl.text = address.note ?? '';
+    if (address.latitude != null && address.longitude != null) {
+      _pinLatLng = ll.LatLng(address.latitude!, address.longitude!);
+      if (mounted) {
+        Future.microtask(() => _mapCtrl.move(_pinLatLng, 16));
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _confirmWithBiometric() async {
+    setState(() => _authenticating = true);
+    final success = await _biometricService.authenticate(
+      localizedReason: 'Verifikasi biometric untuk menyelesaikan checkout',
+      sensitiveTransaction: true,
+    );
+    if (!mounted) return;
+    setState(() => _authenticating = false);
+
+    if (!success) {
+      _showErr('Verifikasi biometric gagal atau dibatalkan.');
+      return;
+    }
+
+    Navigator.pop(context);
+    widget.onConfirm(_method!, _nameCtrl.text.trim(), _addressCtrl.text.trim());
   }
 
   // ── Minta GPS real lalu pindahkan peta ke sana ────────────
@@ -1730,7 +1813,12 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
   // ── STEP 0: ALAMAT + MAP PICKER ─────────────────────────────
   Widget _addrStep() => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     const Text('Alamat Pengiriman', style: TextStyle(fontSize:16, fontWeight:FontWeight.w800, color:AppColors.textPrimary)),
+    const SizedBox(height:6),
+    const Text('Pilih alamat tersimpan atau tentukan titik baru dari peta.',
+        style: TextStyle(fontSize:12, color:AppColors.textSecondary)),
     const SizedBox(height:14),
+    _savedAddressPicker(),
+    if (_savedAddresses.isNotEmpty) const SizedBox(height:14),
     _tf('Nama Penerima', _nameCtrl, Icons.person_outline, 'Nama lengkap penerima'),
     const SizedBox(height:10),
     _tf('Nomor HP', _phoneCtrl, Icons.phone_outlined, '08xxxxxxxxxx', type: TextInputType.phone),
@@ -1757,8 +1845,8 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
               onMapReady: () => setState(() => _mapReady = true),
               // Saat pengguna selesai menggeser peta → update pin & reverse geocode
               onPositionChanged: (pos, hasGesture) {
-                if (hasGesture && pos.center != null) {
-                  setState(() => _pinLatLng = pos.center!);
+                if (hasGesture) {
+                  setState(() => _pinLatLng = pos.center);
                 }
               },
               onMapEvent: (event) {
@@ -1853,6 +1941,135 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
     const SizedBox(height:10),
     _tf('Catatan untuk kurir (opsional)', _noteCtrl, Icons.note_outlined, 'Contoh: titipkan ke satpam'),
   ]);
+
+  Widget _savedAddressPicker() {
+    if (_addressesLoading) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.softCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Row(children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+          ),
+          SizedBox(width: 10),
+          Text('Memuat alamat tersimpan...',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        ]),
+      );
+    }
+
+    if (_savedAddresses.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.softCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.info_outline_rounded, size: 18, color: AppColors.primary),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Belum ada alamat di profil. Alamat baru tetap bisa dipilih dari peta di bawah ini.',
+              style: TextStyle(fontSize: 12, height: 1.35, color: AppColors.textSecondary),
+            ),
+          ),
+        ]),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Alamat Tersimpan',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 112,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _savedAddresses.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, index) {
+              final address = _savedAddresses[index];
+              final selected = _selectedAddress?.id == address.id;
+              return GestureDetector(
+                onTap: () => _useSavedAddress(address),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 220,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.softAccent : AppColors.softCard,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : AppColors.border,
+                      width: selected ? 1.5 : .8,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Icon(
+                          address.label.toLowerCase() == 'rumah'
+                              ? Icons.home_rounded
+                              : address.label.toLowerCase() == 'kantor'
+                                  ? Icons.business_rounded
+                                  : Icons.location_on_rounded,
+                          size: 17,
+                          color: selected ? AppColors.primary : AppColors.textSecondary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(address.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textPrimary)),
+                        ),
+                        if (address.isDefault)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text('Utama',
+                                style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                          ),
+                      ]),
+                      const SizedBox(height: 6),
+                      Text(address.recipientName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: Text(address.fullAddress,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, height: 1.2, color: AppColors.textPrimary)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _tf(String label, TextEditingController ctrl, IconData icon, String hint,
       {TextInputType type = TextInputType.text}) =>
@@ -2000,9 +2217,9 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
       enabled = _method != null;
       onTap   = enabled ? () => setState(() => _step = 2) : null;
     } else {
-      label   = 'Konfirmasi & Pesan Sekarang';
-      enabled = true;
-      onTap   = () { Navigator.pop(context); widget.onConfirm(_method!, _nameCtrl.text.trim(), _addressCtrl.text.trim()); };
+      label   = _authenticating ? 'Memverifikasi...' : 'Verifikasi Biometric & Pesan';
+      enabled = !_authenticating;
+      onTap   = enabled ? _confirmWithBiometric : null;
     }
 
     return Container(
@@ -2020,7 +2237,23 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical:14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation:0),
-            child: Text(label, style: const TextStyle(fontSize:15, fontWeight:FontWeight.w700)))),
+            child: _authenticating
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_step == 2) ...[
+                        const Icon(Icons.fingerprint_rounded, size: 20),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(label, style: const TextStyle(fontSize:15, fontWeight:FontWeight.w700)),
+                    ],
+                  ))),
       ]),
     );
   }

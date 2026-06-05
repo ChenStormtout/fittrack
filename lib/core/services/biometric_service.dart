@@ -12,17 +12,20 @@ class BiometricService {
     }
   }
 
-  Future<bool> authenticate() async {
+  Future<bool> authenticate({
+    String localizedReason = 'Verifikasi identitas untuk login',
+    bool sensitiveTransaction = false,
+  }) async {
     try {
       final isSupported = await _auth.isDeviceSupported();
       if (!isSupported) return false;
 
       return await _auth.authenticate(
-        localizedReason: 'Verifikasi identitas untuk login',
-        options: const AuthenticationOptions(
+        localizedReason: localizedReason,
+        options: AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
-          sensitiveTransaction: false,
+          sensitiveTransaction: sensitiveTransaction,
         ),
       );
     } catch (e) {
