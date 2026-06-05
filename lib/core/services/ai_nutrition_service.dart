@@ -5,7 +5,7 @@ class AiNutritionService {
   static final instance = AiNutritionService._();
   AiNutritionService._();
 
-  static const _apiKey = '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'; // Ganti dengan API key OpenRouter
+  static const _apiKey = ''; // Ganti dengan API key OpenRouter
   static const _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const _model = 'llama-3.1-8b-instant';
 
