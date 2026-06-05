@@ -49,13 +49,23 @@ class _RegisterPageState extends State<RegisterPage> {
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registrasi berhasil, silakan login')),
+        SnackBar(
+          content: const Text('Registrasi berhasil, silakan login'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
       );
-      context.go(AppRoutes.login);
+      Future.delayed(const Duration(milliseconds: 500), () {
+        context.go(AppRoutes.login);
+      });
     } else {
       final message = authController.errorMessage ?? 'Registrasi gagal';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }

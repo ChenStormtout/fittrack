@@ -7,4 +7,5 @@ class TableNames {
   static const workoutSessions = 'workout_sessions';
   static const achievements = 'achievements';
   static const gameScores = 'game_scores';
+  static const biometrics = 'biometrics';
 }

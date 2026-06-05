@@ -435,8 +435,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   onTap: () async {
                     if (authController.biometricEnabled) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Biometric sudah aktif'),
+                        SnackBar(
+                          content: const Text('Biometric sudah aktif'),
+                          backgroundColor: Colors.blue,
                         ),
                       );
                       return;
@@ -446,15 +447,22 @@ class _ProfilePageState extends State<ProfilePage> {
 
                     if (!context.mounted) return;
 
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          success
-                              ? 'Biometric berhasil diaktifkan'
-                              : 'Biometric gagal atau tidak tersedia',
+                    if (success) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Biometric berhasil diaktifkan'),
+                          backgroundColor: Colors.green,
                         ),
-                      ),
-                    );
+                      );
+                    } else {
+                      final errorMessage = authController.errorMessage ?? 'Biometric gagal atau tidak tersedia';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(errorMessage),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
                   },
                 ),
                 const SizedBox(height: 10),

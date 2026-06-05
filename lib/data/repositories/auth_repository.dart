@@ -112,4 +112,72 @@ class AuthRepository {
 
     return updated > 0;
   }
+
+  // Biometric methods
+  Future<bool> isBiometricAlreadyUsed() async {
+    final db = await _appDatabase.database;
+    final result = await db.query(TableNames.biometrics);
+    return result.isNotEmpty;
+  }
+
+  Future<String?> getBiometricEmailIfExists() async {
+    final db = await _appDatabase.database;
+    final result = await db.query(TableNames.biometrics, limit: 1);
+    if (result.isEmpty) return null;
+    return result.first['user_email'] as String?;
+  }
+
+  Future<bool> registerBiometric({
+    required String email,
+    required String biometricData,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    
+    // Check if biometric already exists
+    if (await isBiometricAlreadyUsed()) {
+      return false;
+    }
+
+    final db = await _appDatabase.database;
+    try {
+      await db.insert(
+        TableNames.biometrics,
+        {
+          'user_email': normalizedEmail,
+          'biometric_data': biometricData,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+      return true;
+    } catch (e) {
+      print('Error registering biometric: $e');
+      return false;
+    }
+  }
+
+  Future<bool> removeBiometric({required String email}) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final db = await _appDatabase.database;
+
+    final deleted = await db.delete(
+      TableNames.biometrics,
+      where: 'user_email = ?',
+      whereArgs: [normalizedEmail],
+    );
+
+    return deleted > 0;
+  }
+
+  Future<bool> biometricExistsForEmail(String email) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final db = await _appDatabase.database;
+    final result = await db.query(
+      TableNames.biometrics,
+      where: 'user_email = ?',
+      whereArgs: [normalizedEmail],
+      limit: 1,
+    );
+    return result.isNotEmpty;
+  }
 }

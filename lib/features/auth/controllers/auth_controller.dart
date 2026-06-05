@@ -106,16 +106,51 @@ class AuthController extends ChangeNotifier {
   }
 
   Future<bool> enableBiometric() async {
-    if (_userEmail == null) return false;
+    if (_userEmail == null) {
+      _errorMessage = 'User tidak login';
+      notifyListeners();
+      return false;
+    }
 
     final success = await _biometricService.authenticate();
 
     if (success) {
-      _biometricEnabled = true;
-      await _secureStorageService.setBiometricEnabled(true);
-      notifyListeners();
+      // Check if biometric already used by another account
+      final existingEmail = await _authRepository.getBiometricEmailIfExists();
+      if (existingEmail != null && existingEmail != _userEmail) {
+        _errorMessage = 'Biometric sudah digunakan oleh akun lain';
+        notifyListeners();
+        return false;
+      }
+
+      // Check if this email already has biometric registered
+      final alreadyRegistered = await _authRepository.biometricExistsForEmail(_userEmail!);
+      if (alreadyRegistered) {
+        _errorMessage = 'Biometric sudah didaftarkan untuk akun ini';
+        notifyListeners();
+        return false;
+      }
+
+      // Register biometric
+      final bioRegistered = await _authRepository.registerBiometric(
+        email: _userEmail!,
+        biometricData: 'biometric_${DateTime.now().millisecondsSinceEpoch}',
+      );
+
+      if (bioRegistered) {
+        _biometricEnabled = true;
+        await _secureStorageService.setBiometricEnabled(true);
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = 'Gagal mendaftarkan biometric';
+        notifyListeners();
+        return false;
+      }
     }
-    return success;
+    _errorMessage = 'Biometric authentication gagal';
+    notifyListeners();
+    return false;
   }
 
   Future<bool> loginWithBiometric() async {

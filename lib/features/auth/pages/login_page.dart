@@ -48,11 +48,24 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = false);
 
     if (success) {
-      context.go(AppRoutes.root);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Login berhasil!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(milliseconds: 500), () {
+        context.go(AppRoutes.root);
+      });
     } else {
       final message = authController.errorMessage ?? 'Login gagal';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -67,10 +80,26 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isBiometricLoading = false);
 
     if (success) {
-      context.go(AppRoutes.root);
-    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Biometric gagal atau belum diaktifkan')),
+        SnackBar(
+          content: const Text('Login dengan biometric berhasil!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      Future.delayed(const Duration(milliseconds: 500), () {
+        context.go(AppRoutes.root);
+      });
+    } else {
+      final authController = context.read<AuthController>();
+      final message =
+          authController.errorMessage ?? 'Biometric gagal atau belum diaktifkan';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }

@@ -21,7 +21,7 @@ class AppDatabase {
 
     return openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -120,6 +120,15 @@ class AppDatabase {
         player_name TEXT NOT NULL,
         game_name TEXT NOT NULL,
         score INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE ${TableNames.biometrics} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_email TEXT NOT NULL UNIQUE,
+        biometric_data TEXT NOT NULL,
         created_at TEXT NOT NULL
       )
     ''');
@@ -227,6 +236,17 @@ class AppDatabase {
       await db.execute(
         'ALTER TABLE ${TableNames.gameScores} ADD COLUMN player_name TEXT NOT NULL DEFAULT ""',
       );
+    }
+
+    if (oldVersion < 8) {
+      await db.execute('''
+        CREATE TABLE ${TableNames.biometrics} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_email TEXT NOT NULL UNIQUE,
+          biometric_data TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      ''');
     }
   }
 }
