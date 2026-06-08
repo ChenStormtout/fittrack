@@ -5,7 +5,9 @@ class AiNutritionService {
   static final instance = AiNutritionService._();
   AiNutritionService._();
 
-  static const _apiKey = ''; // Ganti dengan API key OpenRouter
+  // ⚠️ Jangan hardcode API key di sini! Simpan di file .env atau dart-define.
+  // Gunakan: flutter run --dart-define=GROQ_API_KEY=your_key_here
+  static const _apiKey = String.fromEnvironment('GROQ_API_KEY', defaultValue: '');
   static const _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const _model = 'llama-3.1-8b-instant';
 

@@ -450,7 +450,7 @@ class OrderHistoryStore {
   OrderHistoryStore._();
   static final OrderHistoryStore instance = OrderHistoryStore._();
 
-  static const String _storageKey = 'fitlife_order_history';
+  static const String _storageKeyPrefix = 'fitlife_order_history';
 
   final List<OrderHistoryItem> _orders = [];
 
@@ -460,9 +460,25 @@ class OrderHistoryStore {
   static String generateId() =>
       'FL${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
-  Future<void> loadOrders() async {
+  /// Hapus semua data riwayat dari memori (tidak dari storage).
+  /// Panggil ini saat user berganti agar data lama tidak tampil sebelum loadOrders selesai.
+  void clearOrders() {
+    _orders.clear();
+  }
+
+  String _storageKeyFor(String? userEmail) {
+    final normalizedEmail = (userEmail == null || userEmail.trim().isEmpty)
+        ? 'guest'
+        : userEmail.trim().toLowerCase();
+    final encodedEmail = base64Url.encode(utf8.encode(normalizedEmail));
+    return '${_storageKeyPrefix}_$encodedEmail';
+  }
+
+  Future<void> loadOrders(String? userEmail) async {
     final prefs = await SharedPreferences.getInstance();
-    final savedData = prefs.getString(_storageKey);
+    final savedData = prefs.getString(_storageKeyFor(userEmail));
+
+    _orders.clear();
 
     if (savedData == null || savedData.isEmpty) {
       return;
@@ -472,30 +488,32 @@ class OrderHistoryStore {
       final decodedData = jsonDecode(savedData);
 
       if (decodedData is List) {
-        _orders
-          ..clear()
-          ..addAll(
-            decodedData
-                .whereType<Map>()
-                .map(
-                  (item) => OrderHistoryItem.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ),
-                )
-                .toList(),
-          );
+        _orders.addAll(
+          decodedData
+              .whereType<Map>()
+              .map(
+                (item) => OrderHistoryItem.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(),
+        );
       }
     } catch (_) {
       _orders.clear();
     }
   }
 
-  Future<void> addOrder(OrderHistoryItem order) async {
+  Future<void> addOrder(String? userEmail, OrderHistoryItem order) async {
     _orders.add(order);
-    await _saveOrders();
+    await _saveOrders(userEmail);
   }
 
-  Future<void> updateStatus(String orderId, OrderStatus newStatus) async {
+  Future<void> updateStatus(
+    String? userEmail,
+    String orderId,
+    OrderStatus newStatus,
+  ) async {
     final index = _orders.indexWhere((order) => order.orderId == orderId);
 
     if (index == -1) {
@@ -503,20 +521,18 @@ class OrderHistoryStore {
     }
 
     _orders[index].status = newStatus;
-    await _saveOrders();
+    await _saveOrders(userEmail);
   }
 
-  Future<void> _saveOrders() async {
+  Future<void> _saveOrders(String? userEmail) async {
     final prefs = await SharedPreferences.getInstance();
     final encodedData = jsonEncode(
       _orders.map((order) => order.toJson()).toList(),
     );
 
-    await prefs.setString(_storageKey, encodedData);
+    await prefs.setString(_storageKeyFor(userEmail), encodedData);
   }
 }
-
-
 
 class ShopPage extends StatefulWidget {
   const ShopPage({super.key});
@@ -542,6 +558,8 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   bool   _showCart = false;
   bool   _gridView = true;
   int    _activeTab = 0; // 0=Shop, 1=Riwayat
+  String? _historyUserEmail;
+  bool   _isLoadingHistory = false;
 
   static const _categories = [
     'Semua','Kekuatan','Olahraga','Yoga','Teknologi',
@@ -567,15 +585,30 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
     );
 
     NotificationService.instance.init();
-    _loadOrderHistory();
   }
 
-  Future<void> _loadOrderHistory() async {
-    await OrderHistoryStore.instance.loadOrders();
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    final userEmail = context.watch<AuthController>().userEmail;
+
+    if (_historyUserEmail != userEmail) {
+      _historyUserEmail = userEmail;
+      // Langsung clear data lama agar UI tidak menampilkan riwayat user sebelumnya
+      OrderHistoryStore.instance.clearOrders();
+      _loadOrderHistory(userEmail);
+    }
+  }
+
+  Future<void> _loadOrderHistory(String? userEmail) async {
+    if (!mounted) return;
+    setState(() => _isLoadingHistory = true);
+
+    await OrderHistoryStore.instance.loadOrders(userEmail);
 
     if (!mounted) return;
-
-    setState(() {});
+    setState(() => _isLoadingHistory = false);
   }
 
   @override
@@ -883,12 +916,22 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
   );
 
   // ── GRID ──────────────────────────────────────────────────
-  Widget _grid(List<ProductModel> products) => GridView.builder(
-    padding: const EdgeInsets.fromLTRB(12,10,12,16),
-    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount:2, crossAxisSpacing:10, mainAxisSpacing:10, childAspectRatio:.68),
-    itemCount: products.length,
-    itemBuilder: (_,i) => _prodCard(products[i]),
+  Widget _grid(List<ProductModel> products) => LayoutBuilder(
+    builder: (context, constraints) {
+      final cardWidth = (constraints.maxWidth - 34) / 2;
+      final cardHeight = (cardWidth * 1.58).clamp(250.0, 292.0);
+
+      return GridView.builder(
+        padding: const EdgeInsets.fromLTRB(12,10,12,16),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount:2,
+            crossAxisSpacing:10,
+            mainAxisSpacing:10,
+            childAspectRatio: cardWidth / cardHeight),
+        itemCount: products.length,
+        itemBuilder: (_,i) => _prodCard(products[i]),
+      );
+    },
   );
 
   // ── LIST ──────────────────────────────────────────────────
@@ -913,7 +956,7 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Stack(children: [
-            Container(height:98,
+            Container(height:88,
               decoration: BoxDecoration(
                 gradient: LinearGradient(colors: _grad(p.category), begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
@@ -924,27 +967,34 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
                 decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.circular(6)),
                 child: Text('-${p.discountPercent!.toInt()}%', style: const TextStyle(color:Colors.white, fontSize:10, fontWeight:FontWeight.w800)))),
           ]),
-          Padding(padding: const EdgeInsets.fromLTRB(10,8,10,0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(p.name, style: const TextStyle(fontSize:12, fontWeight:FontWeight.w700, color:AppColors.textPrimary, height:1.3), maxLines:2, overflow:TextOverflow.ellipsis),
-            const SizedBox(height:4),
-            Row(children: [
-              const Icon(Icons.star_rounded, color:AppColors.warning, size:12),
-              const SizedBox(width:2),
-              Text('${p.rating}', style: const TextStyle(fontSize:10, color:AppColors.warning, fontWeight:FontWeight.w700)),
-              const SizedBox(width:6),
-              Text('Stok ${p.stock}', style: const TextStyle(fontSize:9, color:AppColors.textSecondary)),
-            ]),
-            const SizedBox(height:5),
-            if (p.isPromo && p.discountPercent != null) ...[
-              Text(_currency.format(p.priceIdr, _selCur),
-                  style: const TextStyle(fontSize:10, color:AppColors.textSecondary, decoration: TextDecoration.lineThrough)),
-              Text(_currency.format(p.finalPrice, _selCur),
-                  style: const TextStyle(fontSize:13, fontWeight:FontWeight.w800, color:AppColors.primary)),
-            ] else
-              Text(_currency.format(p.finalPrice, _selCur),
-                  style: const TextStyle(fontSize:13, fontWeight:FontWeight.w800, color:AppColors.primary)),
-          ])),
-          const Spacer(),
+          Expanded(
+            child: Padding(padding: const EdgeInsets.fromLTRB(10,8,10,0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(p.name, style: const TextStyle(fontSize:12, fontWeight:FontWeight.w700, color:AppColors.textPrimary, height:1.25), maxLines:2, overflow:TextOverflow.ellipsis),
+              const SizedBox(height:4),
+              Row(children: [
+                const Icon(Icons.star_rounded, color:AppColors.warning, size:12),
+                const SizedBox(width:2),
+                Text('${p.rating}', style: const TextStyle(fontSize:10, color:AppColors.warning, fontWeight:FontWeight.w700)),
+                const SizedBox(width:6),
+                Expanded(child: Text('Stok ${p.stock}', style: const TextStyle(fontSize:9, color:AppColors.textSecondary), maxLines:1, overflow:TextOverflow.ellipsis)),
+              ]),
+              const SizedBox(height:5),
+              if (p.isPromo && p.discountPercent != null) ...[
+                Text(_currency.format(p.priceIdr, _selCur),
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize:10, color:AppColors.textSecondary, decoration: TextDecoration.lineThrough)),
+                Text(_currency.format(p.finalPrice, _selCur),
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize:13, fontWeight:FontWeight.w800, color:AppColors.primary)),
+              ] else
+                Text(_currency.format(p.finalPrice, _selCur),
+                    maxLines:1,
+                    overflow:TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize:13, fontWeight:FontWeight.w800, color:AppColors.primary)),
+            ])),
+          ),
           Padding(padding: const EdgeInsets.fromLTRB(8,0,8,8),
             child: qty == 0
                 ? SizedBox(width: double.infinity,
@@ -1007,12 +1057,14 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
                   child: Container(width:32, height:32,
                     decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(9)),
                     child: const Icon(Icons.add, color:Colors.white, size:18)))
-              : Column(children: [
-                  _qBtn(Icons.add_rounded, () => _add(p)),
-                  Padding(padding: const EdgeInsets.symmetric(vertical:4),
-                    child: Text('$qty', style: const TextStyle(fontSize:13, fontWeight:FontWeight.bold))),
-                  _qBtn(Icons.remove_rounded, () => _remove(p)),
-                ]),
+              : SizedBox(
+                  height: 86,
+                  child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    _qBtn(Icons.add_rounded, () => _add(p)),
+                    Text('$qty', style: const TextStyle(fontSize:13, fontWeight:FontWeight.bold)),
+                    _qBtn(Icons.remove_rounded, () => _remove(p)),
+                  ]),
+                ),
         ]),
       ),
     );
@@ -1051,12 +1103,22 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
           const Text('Riwayat Pesanan', style: TextStyle(
               fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           const Spacer(),
-          Text('${orders.length} pesanan',
-              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          if (_isLoadingHistory)
+            const SizedBox(
+              width: 14, height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+            )
+          else
+            Text('${orders.length} pesanan',
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         ]),
       ),
       const Divider(height: 1, color: AppColors.border),
-      Expanded(child: orders.isEmpty
+      Expanded(child: _isLoadingHistory
+          ? const Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            )
+          : orders.isEmpty
           ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(Icons.receipt_long_outlined, size: 72, color: AppColors.sage),
               const SizedBox(height: 16),
@@ -1157,7 +1219,7 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
       selCur: _selCur,
       onStatusChange: (newStatus) {
         OrderHistoryStore.instance
-            .updateStatus(order.orderId, newStatus)
+            .updateStatus(_historyUserEmail, order.orderId, newStatus)
             .then((_) {
           if (!mounted) return;
           setState(() {});
@@ -1287,17 +1349,20 @@ class _ShopPageState extends State<ShopPage> with SingleTickerProviderStateMixin
         final productNames = snapItems
             .map((c) => '${c.product.name} (x${c.quantity})')
             .toList();
-        await OrderHistoryStore.instance.addOrder(OrderHistoryItem(
-          orderId: orderId,
-          productNames: productNames,
-          totalItems: snapItems_n,
-          totalPrice: snapTotal,
-          orderDate: DateTime.now(),
-          status: OrderStatus.packed,
-          paymentMethod: method.label,
-          recipientName: name,
-          deliveryAddress: address,
-        ));
+        await OrderHistoryStore.instance.addOrder(
+          auth.userEmail,
+          OrderHistoryItem(
+            orderId: orderId,
+            productNames: productNames,
+            totalItems: snapItems_n,
+            totalPrice: snapTotal,
+            orderDate: DateTime.now(),
+            status: OrderStatus.packed,
+            paymentMethod: method.label,
+            recipientName: name,
+            deliveryAddress: address,
+          ),
+        );
 
         if (!mounted) return;
         setState(() { _cart.clear(); _showCart = false; });
@@ -1767,7 +1832,12 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(initialChildSize:.86, maxChildSize:.97, minChildSize:.5, expand:false,
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: DraggableScrollableSheet(initialChildSize:.86, maxChildSize:.97, minChildSize:.5, expand:false,
       builder: (_,sc) => Container(
         decoration: const BoxDecoration(color: AppColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
@@ -1779,8 +1849,9 @@ class _CheckoutSheetState extends State<_CheckoutSheet> {
           const Divider(color:AppColors.border),
           Expanded(child: SingleChildScrollView(controller: sc, padding: const EdgeInsets.fromLTRB(20,16,20,20),
             child: _step == 0 ? _addrStep() : _step == 1 ? _payStep() : _confirmStep())),
-          _bottomBtn(),
+          SafeArea(top: false, minimum: EdgeInsets.only(bottom: safeBottom > 0 ? 0 : 8), child: _bottomBtn()),
         ]),
+      ),
       ),
     );
   }

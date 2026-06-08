@@ -116,6 +116,8 @@ static const _gyroThreshold = 0.8;
         authController.currentUser?.fullName?.trim().isNotEmpty == true
             ? authController.currentUser!.fullName!.trim()
             : (authController.userEmail ?? 'Anonymous');
+    final arenaHeight =
+        (MediaQuery.of(context).size.height * 0.48).clamp(320.0, 420.0);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Fit Dash')),
@@ -270,7 +272,7 @@ static const _gyroThreshold = 0.8;
                 }
               },
               child: Container(
-                height: 420,
+                height: arenaHeight,
                 decoration: BoxDecoration(
                   color: AppColors.softCard,
                   borderRadius: BorderRadius.circular(28),
@@ -284,6 +286,7 @@ static const _gyroThreshold = 0.8;
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final laneWidth = constraints.maxWidth / 3;
+                    final fallDistance = constraints.maxHeight - 60;
 
                     return Stack(
                       clipBehavior: Clip.hardEdge,
@@ -341,7 +344,7 @@ static const _gyroThreshold = 0.8;
                         // Falling items
                         ...gameController.items.map((item) {
                           return Positioned(
-                            top: item.y * 360,
+                            top: item.y * fallDistance,
                             left: item.lane * laneWidth +
                                 (laneWidth / 2) -
                                 18,

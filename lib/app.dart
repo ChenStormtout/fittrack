@@ -18,6 +18,17 @@ class FitLifeApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       routerConfig: router,
+      builder: (context, child) {
+        final mediaQuery = MediaQuery.of(context);
+        final textScale = mediaQuery.textScaler.scale(1);
+
+        return MediaQuery(
+          data: mediaQuery.copyWith(
+            textScaler: TextScaler.linear(textScale.clamp(0.9, 1.1).toDouble()),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 }

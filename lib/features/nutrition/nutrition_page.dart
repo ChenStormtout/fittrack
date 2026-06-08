@@ -123,7 +123,7 @@ class _NutritionPageState extends State<NutritionPage> {
     super.dispose();
   }
 
-  // ── AI CHAT METHODS ──────────────────────────────────────────────
+  // AI CHAT METHODS 
   Future<void> _sendAiMessage() async {
     final text = _aiChatController.text.trim();
     if (text.isEmpty) return;
@@ -221,7 +221,7 @@ class _NutritionPageState extends State<NutritionPage> {
     }
   }
 
-  // ── FOOD SCAN ────────────────────────────────────────────────────
+  //FOOD SCAN
   Future<void> _scanFoodPhoto(
     BuildContext context,
     NutritionController nutritionController,
@@ -655,16 +655,23 @@ class _NutritionPageState extends State<NutritionPage> {
 
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (_) {
         return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -750,7 +757,9 @@ class _NutritionPageState extends State<NutritionPage> {
                 },
                 child: const Text('Tambah Custom'),
               ),
-            ],
+                ],
+              ),
+            ),
           ),
         );
       },

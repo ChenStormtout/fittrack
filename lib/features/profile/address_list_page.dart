@@ -591,7 +591,12 @@ class _AddressFormPageState extends State<_AddressFormPage> {
         elevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
         child: Form(
           key: _formKey,
           child: Column(

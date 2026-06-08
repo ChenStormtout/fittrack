@@ -195,7 +195,7 @@ class OutdoorResultPage extends StatelessWidget {
                   physics: const NeverScrollableScrollPhysics(),
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
-                  childAspectRatio: 1.4,
+                  childAspectRatio: 1.15,
                   children: [
                     _statTile(
                       label: 'Total Jarak',
@@ -446,27 +446,32 @@ class OutdoorResultPage extends StatelessWidget {
               ),
             ],
           ),
-          RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: value,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
-                ),
-                if (unit.isNotEmpty)
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: RichText(
+              maxLines: 1,
+              text: TextSpan(
+                children: [
                   TextSpan(
-                    text: ' $unit',
+                    text: value,
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: color.withOpacity(0.7),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: color,
                     ),
                   ),
-              ],
+                  if (unit.isNotEmpty)
+                    TextSpan(
+                      text: ' $unit',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: color.withOpacity(0.7),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
